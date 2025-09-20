@@ -13,7 +13,7 @@ export function OpenAIConnectCard() {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const docsUrl = "https://platform.openai.com/docs/guides/cli";
+  const docsUrl = "https://platform.openai.com/docs/guides/openai-cli";
   const hasConnection = openAiStatus.connected;
   const connectionLabel = hasConnection
     ? openAi.statusConnected(openAiStatus.label ?? openAi.statusMasked(openAiStatus.maskedKey ?? "••••"))
