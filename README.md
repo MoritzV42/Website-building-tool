@@ -78,6 +78,8 @@ npm run dev:desktop
 
 `StartWebsiteBuilder.py` erstellt beim Start eine Verknüpfung **„Codex Website Builder.lnk“** im Projektordner, legt automatisch das Icon `assets/codex-launcher.ico` aus der Textdatei `assets/codex-launcher.ico.b64` an **und startet die Desktop-App (`npm run dev:desktop`)**. Du kannst die Verknüpfung an die Taskleiste pinnen oder das Icon nach Bedarf austauschen, indem du die generierte `.ico`-Datei ersetzt.
 
+> **Hinweis für Server/Headless-Umgebungen:** Erkennt das Skript kein grafisches Umfeld (z. B. Linux ohne `DISPLAY`/Wayland), wechselt es automatisch in den Browser-Modus (`npm run dev`). Die Konsole zeigt dann weiterhin alle Logs an, während du unter [http://localhost:5173](http://localhost:5173) im Browser arbeitest.
+
 ---
 
 ## Workflow
