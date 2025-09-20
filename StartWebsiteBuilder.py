@@ -15,6 +15,7 @@ when you are done working with the Website Builder.
 from __future__ import annotations
 
 import base64
+import os
 import shutil
 import subprocess
 import sys
@@ -149,7 +150,26 @@ def ensure_windows_shortcut(python_path: str) -> None:
         print("⚠️  Konnte Verknüpfung nicht erstellen:", error)
 
 
-def launch_desktop_app(npm_path: str) -> None:
+def has_graphical_environment() -> bool:
+    """Return True if a graphical desktop environment is likely available."""
+
+    if sys.platform == "win32":
+        return True
+
+    if sys.platform == "darwin":
+        return True
+
+    if sys.platform.startswith("linux"):
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            return True
+        if os.environ.get("WSL_DISTRO_NAME"):
+            return False
+        return False
+
+    return False
+
+
+def launch_desktop_app(npm_path: str) -> bool:
     """Start the desktop shell and stream its output until interruption."""
     print("\n🚀 Starte Desktop-App (Strg+C zum Beenden)...\n")
     process = subprocess.Popen(
@@ -172,10 +192,45 @@ def launch_desktop_app(npm_path: str) -> None:
         except subprocess.TimeoutExpired:
             process.kill()
         print("✅ Desktop-App beendet.")
+        return True
+
+    return_code = process.wait()
+    if return_code != 0:
+        print("\n❌ Desktop-App hat einen Fehler gemeldet.")
+        return False
+
+    return True
+
+
+def launch_browser_mode(npm_path: str) -> None:
+    """Start the browser-based dev mode for environments without Electron."""
+
+    print("\n🌐 Starte Browser-Modus (Strg+C zum Beenden)...\n")
+    print("ℹ️  Öffne http://localhost:5173/ im Browser, sobald Vite bereit ist.\n")
+    process = subprocess.Popen(
+        [npm_path, "run", "dev"],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    assert process.stdout is not None
+
+    try:
+        for line in process.stdout:
+            print(line, end="")
+    except KeyboardInterrupt:
+        print("\n🛑 Stoppe Dev-Server...")
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        print("✅ Dev-Server beendet.")
         return
 
     if process.wait() != 0:
-        print("\n❌ Desktop-App hat einen Fehler gemeldet.")
+        print("\n❌ Dev-Server hat einen Fehler gemeldet.")
         sys.exit(1)
 
 
@@ -190,7 +245,16 @@ def main() -> None:
 
     ensure_windows_shortcut(sys.executable)
 
-    launch_desktop_app(npm_path)
+    if has_graphical_environment():
+        desktop_started = launch_desktop_app(npm_path)
+        if desktop_started:
+            return
+        print("\n⚠️  Desktop-Modus konnte nicht gestartet werden. Wechsle in Browser-Modus.")
+
+    else:
+        print("\n⚠️  Kein grafisches Umfeld erkannt – starte Browser-Modus.")
+
+    launch_browser_mode(npm_path)
 
 
 if __name__ == "__main__":
