@@ -45,3 +45,8 @@ export interface ChangeLogEntry {
   createdAt: number;
   level: "info" | "warning" | "error";
 }
+
+export interface OpenAiStatus {
+  configured: boolean;
+  maskedKey: string | null;
+}

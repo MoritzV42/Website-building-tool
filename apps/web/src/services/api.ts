@@ -1,4 +1,4 @@
-import type { GitStatusSummary, Task } from "../types";
+import type { GitStatusSummary, OpenAiStatus, Task } from "../types";
 import useEditorStore from "../state/useEditorStore";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -37,4 +37,20 @@ export async function createTask(task: Pick<Task, "selector" | "goal"> & { files
 
 export async function fetchTasks() {
   return request<Task[]>("/api/tasks");
+}
+
+export async function selectRepositoryDirectory() {
+  const response = await request<{ path: string | null }>("/api/system/select-directory", { method: "POST" });
+  return response.path;
+}
+
+export async function fetchOpenAiStatus() {
+  return request<OpenAiStatus>("/api/settings/openai");
+}
+
+export async function updateOpenAiKey(apiKey: string) {
+  return request<OpenAiStatus>("/api/settings/openai", {
+    method: "POST",
+    body: JSON.stringify({ apiKey })
+  });
 }

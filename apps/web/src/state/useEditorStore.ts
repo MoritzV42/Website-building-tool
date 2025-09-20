@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { samplePreviewHtml } from "../data/samplePreview";
 import type { Language } from "../data/translations";
-import type { ChangeLogEntry, GitStatusSummary, PatchEvent, Task } from "../types";
+import type { ChangeLogEntry, GitStatusSummary, OpenAiStatus, PatchEvent, Task } from "../types";
 
 const DEFAULT_SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:8787";
 
@@ -24,6 +24,10 @@ interface EditorState {
   isPickerActive: boolean;
   previewHtml: string;
   websocketReady: boolean;
+  openAiStatus: OpenAiStatus;
+  tutorialVisible: boolean;
+  tutorialStep: number;
+  tutorialCompleted: boolean;
   setLanguage(language: Language): void;
   setServerUrl(url: string): void;
   setRepositoryPath(path: string | null): void;
@@ -37,7 +41,17 @@ interface EditorState {
   setPickerActive(active: boolean): void;
   setPreviewHtml(html: string): void;
   setWebsocketReady(ready: boolean): void;
+  setOpenAiStatus(status: OpenAiStatus): void;
+  startTutorial(): void;
+  setTutorialStep(step: number): void;
+  closeTutorial(): void;
+  completeTutorial(): void;
+  restartTutorial(): void;
 }
+
+const TUTORIAL_STORAGE_KEY = "codex.tutorial";
+const hasWindow = typeof window !== "undefined";
+const storedTutorialState = hasWindow ? window.localStorage.getItem(TUTORIAL_STORAGE_KEY) : null;
 
 export const useEditorStore = create<EditorState>((set) => ({
   language: DEFAULT_LANGUAGE,
@@ -53,6 +67,10 @@ export const useEditorStore = create<EditorState>((set) => ({
   isPickerActive: false,
   previewHtml: samplePreviewHtml,
   websocketReady: false,
+  openAiStatus: { configured: false, maskedKey: null },
+  tutorialVisible: false,
+  tutorialStep: 0,
+  tutorialCompleted: storedTutorialState === "completed",
   setLanguage: (language) => set({ language }),
   setServerUrl: (url) => {
     set({
@@ -93,7 +111,31 @@ export const useEditorStore = create<EditorState>((set) => ({
   setSelectedSelector: (selector) => set({ selectedSelector: selector }),
   setPickerActive: (active) => set({ isPickerActive: active }),
   setPreviewHtml: (html) => set({ previewHtml: html }),
-  setWebsocketReady: (ready) => set({ websocketReady: ready })
+  setWebsocketReady: (ready) => set({ websocketReady: ready }),
+  setOpenAiStatus: (status) => set({ openAiStatus: status }),
+  startTutorial: () =>
+    set(() => {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(TUTORIAL_STORAGE_KEY);
+      }
+      return { tutorialVisible: true, tutorialStep: 0, tutorialCompleted: false };
+    }),
+  setTutorialStep: (step) => set({ tutorialStep: step }),
+  closeTutorial: () => set({ tutorialVisible: false }),
+  completeTutorial: () =>
+    set(() => {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(TUTORIAL_STORAGE_KEY, "completed");
+      }
+      return { tutorialCompleted: true, tutorialVisible: false };
+    }),
+  restartTutorial: () =>
+    set(() => {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(TUTORIAL_STORAGE_KEY);
+      }
+      return { tutorialStep: 0, tutorialVisible: true, tutorialCompleted: false };
+    })
 }));
 
 export default useEditorStore;

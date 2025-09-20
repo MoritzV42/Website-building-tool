@@ -5,6 +5,7 @@ import { createServer } from "http";
 import path from "node:path";
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
+import { spawn } from "node:child_process";
 import express from "express";
 import { simpleGit } from "simple-git";
 import { WebSocketServer, WebSocket } from "ws";
@@ -12,6 +13,7 @@ import { createTwoFilesPatch } from "diff";
 import { randomUUID } from "node:crypto";
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
+const ENV_PATH = path.resolve(process.cwd(), "..", "..", ".env");
 
 interface TaskRequest {
   selector: string;
@@ -140,6 +142,169 @@ class WorkspaceManager {
   }
 }
 
+async function runCommand(command: string, args: string[]) {
+  return await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
+    const child = spawn(command, args, { windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (data) => {
+      stdout += data.toString();
+    });
+    child.stderr?.on("data", (data) => {
+      stderr += data.toString();
+    });
+    child.on("error", (error) => {
+      reject(error);
+    });
+    child.on("close", (code) => {
+      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
+    });
+  });
+}
+
+async function openDirectoryPicker(): Promise<string | null> {
+  const platform = process.platform;
+
+  if (platform === "win32") {
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      "$shell = New-Object -ComObject Shell.Application",
+      "$folder = $shell.BrowseForFolder(0, 'Wähle den Root-Ordner deines Git-Repositories', 0, 0)",
+      "if ($folder) { [Console]::Out.WriteLine($folder.Self.Path) }"
+    ].join("; ");
+
+    try {
+      const { stdout, exitCode, stderr } = await runCommand("powershell", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script
+      ]);
+      if (exitCode !== 0) {
+        throw new Error(stderr || "Directory picker was cancelled");
+      }
+      const output = stdout.trim();
+      return output || null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error("PowerShell wurde nicht gefunden. Bitte Pfad manuell eintragen.");
+      }
+      if (error instanceof Error && (/Bin[aä]rdat/i.test(error.message) || /Binary data/i.test(error.message))) {
+        throw new Error(
+          "Windows konnte den Ordnerdialog nicht öffnen. Bitte starte Codex in einer klassischen PowerShell (x64) oder gib den Pfad manuell ein."
+        );
+      }
+      throw error;
+    }
+  }
+
+  if (platform === "darwin") {
+    const script = "POSIX path of (choose folder with prompt \"Select the root of your Git repository for Codex\")";
+    try {
+      const { stdout, exitCode, stderr } = await runCommand("osascript", ["-e", script]);
+      if (exitCode !== 0) {
+        if (stderr.includes("User canceled")) {
+          return null;
+        }
+        throw new Error(stderr || "Directory picker failed");
+      }
+      return stdout || null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error("osascript ist nicht verfügbar. Bitte Pfad manuell eintragen.");
+      }
+      throw error;
+    }
+  }
+
+  if (platform === "linux") {
+    try {
+      const { stdout, exitCode, stderr } = await runCommand("zenity", [
+        "--file-selection",
+        "--directory",
+        "--title=Select the root of your Git repository",
+      ]);
+      if (exitCode !== 0) {
+        if (!stderr) {
+          return null;
+        }
+        throw new Error(stderr);
+      }
+      return stdout || null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error("Zenity ist nicht installiert. Bitte Pfad manuell eintragen.");
+      }
+      throw error;
+    }
+  }
+
+  throw new Error(`Directory picker is not supported on ${platform}`);
+}
+
+function formatOpenAiStatus(apiKey: string | null) {
+  if (!apiKey) {
+    return { configured: false, maskedKey: null };
+  }
+  const trimmed = apiKey.trim();
+  const visible = trimmed.slice(-4);
+  const masked = `${"•".repeat(Math.max(trimmed.length - 4, 0))}${visible}`;
+  return { configured: true, maskedKey: masked };
+}
+
+async function readOpenAiKey(): Promise<string | null> {
+  try {
+    const content = await fsp.readFile(ENV_PATH, "utf8");
+    const line = content
+      .split(/\r?\n/)
+      .find((entry) => entry.trim().startsWith("OPENAI_API_KEY="));
+    if (!line) {
+      return null;
+    }
+    return line.slice("OPENAI_API_KEY=".length).trim();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function writeOpenAiKey(value: string | null) {
+  const normalized = value ?? "";
+  let content = "";
+  try {
+    content = await fsp.readFile(ENV_PATH, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  const pattern = /^OPENAI_API_KEY=.*$/m;
+  if (normalized) {
+    if (pattern.test(content)) {
+      content = content.replace(pattern, `OPENAI_API_KEY=${normalized}`);
+    } else {
+      content = `${content.trimEnd() ? `${content.trimEnd()}\n` : ""}OPENAI_API_KEY=${normalized}\n`;
+    }
+  } else if (pattern.test(content)) {
+    content = content.replace(pattern, "");
+    content = content
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== "")
+      .join("\n");
+    if (content) {
+      content = `${content}\n`;
+    }
+  }
+
+  await fsp.writeFile(ENV_PATH, content, "utf8");
+}
+
 const app = express();
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
@@ -172,6 +337,15 @@ app.post("/api/repository", async (req, res) => {
   }
 });
 
+app.post("/api/system/select-directory", async (_req, res) => {
+  try {
+    const selectedPath = await openDirectoryPicker();
+    res.json({ path: selectedPath });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
 app.get("/api/repository/status", async (_req, res) => {
   try {
     const status = await workspace.getGitStatus();
@@ -183,6 +357,26 @@ app.get("/api/repository/status", async (_req, res) => {
 
 app.get("/api/tasks", (_req, res) => {
   res.json(tasks);
+});
+
+app.get("/api/settings/openai", async (_req, res) => {
+  try {
+    const apiKey = await readOpenAiKey();
+    res.json(formatOpenAiStatus(apiKey));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+app.post("/api/settings/openai", async (req, res) => {
+  const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+  try {
+    await writeOpenAiKey(apiKey || null);
+    const status = await readOpenAiKey();
+    res.json(formatOpenAiStatus(status));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
 });
 
 app.post("/api/tasks", async (req, res) => {

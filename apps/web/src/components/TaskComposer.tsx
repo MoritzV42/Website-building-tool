@@ -5,6 +5,7 @@ import useEditorStore from "../state/useEditorStore";
 import type { Task } from "../types";
 import { useTranslation } from "../hooks/useTranslation";
 import { TutorialPanel } from "./TutorialPanel";
+import { OpenAIConnectCard } from "./OpenAIConnectCard";
 
 const STATUS_COLORS: Record<Task["status"], string> = {
   pending: "bg-slate-500/20 text-slate-300",
@@ -64,8 +65,12 @@ export function TaskComposer() {
   return (
     <section className="flex h-full flex-col gap-4">
       <TutorialPanel />
+      <OpenAIConnectCard />
 
-      <div className="rounded-2xl border border-white/5 bg-slate-900/60 p-4 shadow-surface">
+      <div
+        className="rounded-2xl border border-white/5 bg-slate-900/60 p-4 shadow-surface"
+        data-tutorial-anchor="task-composer"
+      >
         <div className="mb-3 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-300">{taskComposer.title}</h2>

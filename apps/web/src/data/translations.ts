@@ -7,6 +7,35 @@ interface TutorialSection {
   bullets: string[];
 }
 
+type TutorialStepPlacement = "top" | "bottom" | "left" | "right";
+
+interface TutorialOverlayStep {
+  id: string;
+  anchor: string;
+  heading: string;
+  description: string;
+  placement: TutorialStepPlacement;
+}
+
+interface TutorialCopy {
+  card: {
+    title: string;
+    intro: string;
+    start: string;
+    skip: string;
+    sections: TutorialSection[];
+    outro: string;
+  };
+  overlay: {
+    skip: string;
+    back: string;
+    next: string;
+    finish: string;
+    progress: (current: number, total: number) => string;
+    steps: TutorialOverlayStep[];
+  };
+}
+
 interface Translation {
   languageToggle: {
     label: string;
@@ -17,14 +46,18 @@ interface Translation {
     subtitle: (serverUrl: string) => string;
     repositoryLabel: string;
     repositoryPlaceholder: string;
+    repositoryHint: string;
     connect: string;
     reconnect: string;
     connecting: string;
+    pickDirectory: string;
+    pickingDirectory: string;
     statusConnected: string;
     statusOffline: string;
     branchChanges: (count: number) => string;
     connectLog: (repository: string) => string;
     connectErrorFallback: string;
+    pickerError: string;
   };
   taskComposer: {
     title: string;
@@ -58,11 +91,21 @@ interface Translation {
     emptyLogs: string;
     logLevelLabel: Record<"info" | "warning" | "error", string>;
   };
-  tutorial: {
+  tutorial: TutorialCopy;
+  openAi: {
     title: string;
-    intro: string;
-    sections: TutorialSection[];
-    outro: string;
+    description: string;
+    placeholder: string;
+    connect: string;
+    connecting: string;
+    replace: string;
+    clear: string;
+    cancel: string;
+    helper: string;
+    docsLabel: string;
+    statusConnected: (masked: string) => string;
+    statusMissing: string;
+    errorEmpty: string;
   };
 }
 
@@ -80,14 +123,18 @@ export const translations: Record<Language, Translation> = {
       subtitle: (serverUrl) => `Local workspace orchestrator • Backend: ${serverUrl}`,
       repositoryLabel: "Repository Path",
       repositoryPlaceholder: "/path/to/project",
+      repositoryHint: "Pick the folder that contains your .git directory.",
       connect: "Connect",
       reconnect: "Reconnect",
       connecting: "Connecting…",
+      pickDirectory: "Choose Folder",
+      pickingDirectory: "Opening…",
       statusConnected: "Connected",
       statusOffline: "Offline",
       branchChanges: (count) => `${count} ${count === 1 ? "change" : "changes"}`,
       connectLog: (repository) => `Repository connected: ${repository}`,
-      connectErrorFallback: "Failed to connect"
+      connectErrorFallback: "Failed to connect",
+      pickerError: "Unable to open the system folder picker"
     },
     taskComposer: {
       title: "Task Composer",
@@ -131,43 +178,109 @@ export const translations: Record<Language, Translation> = {
       }
     },
     tutorial: {
-      title: "Quickstart Tutorial",
-      intro: "Follow these steps to create a new Codex-driven project and iterate faster.",
-      sections: [
-        {
-          heading: "1. Create or connect a project",
-          bullets: [
-            "Use \"Connect\" in the top bar to select an empty folder or existing repository.",
-            "Codex mirrors the workspace locally and keeps git status in sync.",
-            "If your project has a dev server, start it and provide the preview URL in the settings panel."
-          ]
-        },
-        {
-          heading: "2. Describe your idea in the task chat",
-          bullets: [
-            "Activate the element picker, click the component you want to change, and the selector is filled in automatically.",
-            "Explain what you need in natural language – layout tweaks, new sections, or data wiring all work.",
-            "Submit the task to Codex and it will begin drafting code immediately."
-          ]
-        },
-        {
-          heading: "3. Watch Codex build the experience",
-          bullets: [
-            "The live preview streams every file Codex touches – from new style sheets to component edits.",
-            "Each change is rendered instantly so you can see the UX evolve without leaving the page.",
-            "If Codex adds assets or scripts, they appear in the preview and in the change feed in real time."
-          ]
-        },
-        {
-          heading: "4. Review diffs and iterate",
-          bullets: [
-            "Inspect patches in the change feed and approve or reject them directly in your editor.",
-            "Queue follow-up tasks to refine copy, polish styles, or wire up functionality.",
-            "Once satisfied, commit the changes and push them with your usual git workflow."
-          ]
-        }
-      ],
-      outro: "Tip: Keep tasks focused. Smaller goals stream faster and make the live preview easier to follow."
+      card: {
+        title: "Guided onboarding",
+        intro: "Take the interactive tour to see how Codex connects to your repository, GPT account, and live preview.",
+        start: "Start guided tour",
+        skip: "Skip for now",
+        sections: [
+          {
+            heading: "1. Connect your Git workspace",
+            bullets: [
+              "Use the \"Choose Folder\" button in the top bar to select the root folder that contains your .git directory.",
+              "Codex mirrors the repository locally and keeps git status and file watchers in sync.",
+              "Keep the backend running while you work so file changes stream instantly into the UI."
+            ]
+          },
+          {
+            heading: "2. Describe the next change",
+            bullets: [
+              "Activate the element picker, click the component you want to adjust, and Codex fills the selector automatically.",
+              "Explain your goal in natural language – layout tweaks, new features, copy updates or refactors all work.",
+              "Send the task to Codex and watch it create patches in your shadow workspace."
+            ]
+          },
+          {
+            heading: "3. Review preview & diffs",
+            bullets: [
+              "The live preview streams each patch so you can validate UX changes immediately.",
+              "Use the change feed to inspect diff snippets, logs, and file events without leaving the browser.",
+              "Commit approved patches in your editor once you're happy with the outcome."
+            ]
+          },
+          {
+            heading: "4. Link your GPT account",
+            bullets: [
+              "Add your GPT API key in the \"Connect Codex to GPT\" card to let Codex draft tasks with your own account.",
+              "Keys are stored locally in your .env file and never leave your machine.",
+              "You can remove or rotate the key at any time from the same panel."
+            ]
+          }
+        ],
+        outro: "Tip: You can restart the guided tour at any time via the card above the task composer."
+      },
+      overlay: {
+        skip: "Skip tutorial",
+        back: "Back",
+        next: "Next",
+        finish: "Finish",
+        progress: (current, total) => `Step ${current} of ${total}`,
+        steps: [
+          {
+            id: "connect-repo",
+            anchor: "repository",
+            heading: "Connect your repository",
+            description:
+              "Pick the root folder that contains .git, then press Connect. Codex mirrors the repo and streams git status.",
+            placement: "bottom"
+          },
+          {
+            id: "task-composer",
+            anchor: "task-composer",
+            heading: "Describe the change",
+            description:
+              "Use the element picker to fill the selector automatically, then write the outcome you expect Codex to build.",
+            placement: "right"
+          },
+          {
+            id: "preview",
+            anchor: "preview",
+            heading: "Watch the live preview",
+            description: "Patches render instantly here so you can validate UX without leaving the dashboard.",
+            placement: "left"
+          },
+          {
+            id: "change-feed",
+            anchor: "change-feed",
+            heading: "Inspect diffs & logs",
+            description: "Every patch and backend log appears here. Approve changes once you're satisfied.",
+            placement: "left"
+          },
+          {
+            id: "gpt-connect",
+            anchor: "gpt-connect",
+            heading: "Link Codex to GPT",
+            description:
+              "Paste your GPT API key, save it locally, and you're ready to draft tasks with your own account.",
+            placement: "right"
+          }
+        ]
+      }
+    },
+    openAi: {
+      title: "Connect Codex to GPT",
+      description: "Codex uses your GPT account to generate code. Add your API key once and it stays on your machine.",
+      placeholder: "sk-...",
+      connect: "Save API key",
+      connecting: "Saving…",
+      replace: "Replace key",
+      clear: "Remove key",
+      cancel: "Cancel",
+      helper: "Keys are written to .env in this repository. Restart the dev server after rotating credentials.",
+      docsLabel: "Open setup guide",
+      statusConnected: (masked) => `Connected • ${masked}`,
+      statusMissing: "Not connected yet",
+      errorEmpty: "Enter your API key before saving."
     }
   },
   de: {
@@ -183,14 +296,18 @@ export const translations: Record<Language, Translation> = {
       subtitle: (serverUrl) => `Lokaler Workspace-Orchestrator • Backend: ${serverUrl}`,
       repositoryLabel: "Repository-Pfad",
       repositoryPlaceholder: "/pfad/zum/projekt",
+      repositoryHint: "Wähle den Ordner, der dein .git-Verzeichnis enthält.",
       connect: "Verbinden",
       reconnect: "Neu verbinden",
       connecting: "Verbinde…",
+      pickDirectory: "Pfad auswählen",
+      pickingDirectory: "Öffne…",
       statusConnected: "Verbunden",
       statusOffline: "Offline",
       branchChanges: (count) => `${count} ${count === 1 ? "Änderung" : "Änderungen"}`,
       connectLog: (repository) => `Repository verbunden: ${repository}`,
-      connectErrorFallback: "Verbindung fehlgeschlagen"
+      connectErrorFallback: "Verbindung fehlgeschlagen",
+      pickerError: "Ordnerauswahl konnte nicht geöffnet werden"
     },
     taskComposer: {
       title: "Task Composer",
@@ -234,43 +351,108 @@ export const translations: Record<Language, Translation> = {
       }
     },
     tutorial: {
-      title: "Schnellstart-Tutorial",
-      intro: "Mit diesen Schritten erstellst du ein neues Codex-Projekt und arbeitest iterativ.",
-      sections: [
-        {
-          heading: "1. Projekt anlegen oder verbinden",
-          bullets: [
-            "Klicke oben auf \"Verbinden\" und wähle einen leeren Ordner oder ein bestehendes Repository aus.",
-            "Codex spiegelt den Workspace lokal und hält den Git-Status synchron.",
-            "Falls dein Projekt einen Dev-Server hat, starte ihn und hinterlege die Preview-URL in den Einstellungen."
-          ]
-        },
-        {
-          heading: "2. Idee im Task-Chat beschreiben",
-          bullets: [
-            "Aktiviere den Element-Picker, klicke das gewünschte Element – der Selektor wird automatisch übernommen.",
-            "Formuliere dein Ziel in natürlicher Sprache: Layout, neue Sektionen oder Logik – alles möglich.",
-            "Sende den Task an Codex, damit sofort der erste Code-Entwurf entsteht."
-          ]
-        },
-        {
-          heading: "3. Live beim Bauen zuschauen",
-          bullets: [
-            "Die Live-Vorschau zeigt jede Datei, die Codex anfasst – von neuen Stylesheets bis zu Component-Updates.",
-            "Alle Änderungen rendern sofort, sodass du das UX ohne Kontextwechsel beurteilen kannst.",
-            "Legt Codex Styles oder Skripte an, siehst du sie direkt in der Vorschau und im Change Feed."
-          ]
-        },
-        {
-          heading: "4. Diffs prüfen und weiter iterieren",
-          bullets: [
-            "Checke Patches im Change Feed und entscheide dort über Annehmen oder Verwerfen.",
-            "Reihe Folge-Tasks ein, um Texte zu verfeinern, Styles zu polieren oder Funktionen anzubinden.",
-            "Bist du zufrieden, committe wie gewohnt und pushe deine Änderungen."
-          ]
-        }
-      ],
-      outro: "Tipp: Halte Tasks fokussiert. Kleine Ziele streamen schneller und machen die Live-Vorschau übersichtlicher."
+      card: {
+        title: "Geführtes Onboarding",
+        intro: "Lass dir in wenigen Schritten zeigen, wie Codex Repository, GPT-Account und Live-Vorschau verbindet.",
+        start: "Tutorial starten",
+        skip: "Überspringen",
+        sections: [
+          {
+            heading: "1. Git-Workspace verbinden",
+            bullets: [
+              "Nutze den Button \"Pfad auswählen\" in der Kopfzeile und wähle den Ordner mit deinem .git-Verzeichnis.",
+              "Codex spiegelt das Repository lokal und hält Git-Status sowie Dateiwatcher synchron.",
+              "Lass das Backend im Hintergrund laufen, damit Dateiänderungen sofort ins UI gestreamt werden."
+            ]
+          },
+          {
+            heading: "2. Nächste Änderung beschreiben",
+            bullets: [
+              "Aktiviere den Element-Picker, klicke die Ziel-Komponente und Codex übernimmt den Selektor automatisch.",
+              "Beschreibe dein Ziel in natürlicher Sprache – Layout, Features, Copy oder Refactorings funktionieren.",
+              "Sende den Task und beobachte, wie Codex Patches im Schatten-Workspace erzeugt."
+            ]
+          },
+          {
+            heading: "3. Vorschau & Diffs prüfen",
+            bullets: [
+              "Die Live-Vorschau rendert jede Änderung sofort, damit du das Ergebnis ohne Kontextwechsel bewerten kannst.",
+              "Im Change Feed findest du Diff-Ausschnitte, Logs und Dateievents gebündelt.",
+              "Bist du zufrieden, bestätige die Änderungen in deinem Editor und committe wie gewohnt."
+            ]
+          },
+          {
+            heading: "4. GPT-Account verknüpfen",
+            bullets: [
+              "Hinterlege deinen GPT-API-Schlüssel im Panel \"Codex mit GPT verbinden\".",
+              "Der Schlüssel bleibt lokal in deiner .env-Datei und verlässt deinen Rechner nicht.",
+              "Du kannst den Schlüssel jederzeit austauschen oder entfernen."
+            ]
+          }
+        ],
+        outro: "Tipp: Du kannst das Tutorial jederzeit über die Karte oberhalb des Task Composers neu starten."
+      },
+      overlay: {
+        skip: "Tutorial überspringen",
+        back: "Zurück",
+        next: "Weiter",
+        finish: "Fertig",
+        progress: (current, total) => `Schritt ${current} von ${total}`,
+        steps: [
+          {
+            id: "connect-repo",
+            anchor: "repository",
+            heading: "Repository verbinden",
+            description:
+              "Wähle den Git-Root deines Projekts und klicke auf Verbinden. Codex spiegelt den Ordner und liest den Git-Status.",
+            placement: "bottom"
+          },
+          {
+            id: "task-composer",
+            anchor: "task-composer",
+            heading: "Änderung formulieren",
+            description:
+              "Picker aktivieren, Element wählen und dein Ziel beschreiben – Codex erstellt daraus den Task.",
+            placement: "right"
+          },
+          {
+            id: "preview",
+            anchor: "preview",
+            heading: "Live-Vorschau verfolgen",
+            description: "Hier siehst du jede Änderung sofort, inklusive Hover- und Selektor-Overlay.",
+            placement: "left"
+          },
+          {
+            id: "change-feed",
+            anchor: "change-feed",
+            heading: "Diffs & Logs prüfen",
+            description: "Alle Patches und Backend-Logs landen hier – perfekt zum Kontrollieren und Freigeben.",
+            placement: "left"
+          },
+          {
+            id: "gpt-connect",
+            anchor: "gpt-connect",
+            heading: "GPT verbinden",
+            description: "Trage deinen GPT-Schlüssel ein, speichere ihn lokal und nutze Codex mit deinem Account.",
+            placement: "right"
+          }
+        ]
+      }
+    },
+    openAi: {
+      title: "Codex mit GPT verbinden",
+      description: "Codex nutzt deinen GPT-Account für Code-Vorschläge. Der Schlüssel bleibt lokal auf deinem Rechner.",
+      placeholder: "sk-...",
+      connect: "API-Schlüssel speichern",
+      connecting: "Speichere…",
+      replace: "Schlüssel ersetzen",
+      clear: "Schlüssel entfernen",
+      cancel: "Abbrechen",
+      helper: "Der Schlüssel wird in der .env dieses Repositories abgelegt. Nach Änderungen den Dev-Server neu starten.",
+      docsLabel: "Anleitung öffnen",
+      statusConnected: (masked) => `Verbunden • ${masked}`,
+      statusMissing: "Noch nicht verbunden",
+      errorEmpty: "Bitte gib vor dem Speichern einen API-Schlüssel ein."
     }
   }
 };
