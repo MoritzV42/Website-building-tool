@@ -115,7 +115,7 @@ def ensure_windows_shortcut(python_path: str) -> None:
         "$shell = New-Object -ComObject WScript.Shell",
         "$shortcut = $shell.CreateShortcut('{shortcut}')",
         "$shortcut.TargetPath = '{python_exe}'",
-        "$shortcut.Arguments = '"{script}"'",
+        "$shortcut.Arguments = '\"{script}\"'",
         "$shortcut.WorkingDirectory = '{working_dir}'",
         "$shortcut.WindowStyle = 1",
         "$shortcut.Description = 'Start Codex Website Builder'",
