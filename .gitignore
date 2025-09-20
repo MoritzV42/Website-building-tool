@@ -1,0 +1,17 @@
+node_modules/
+dist/
+apps/web/dist/
+apps/server/dist/
+.pnp.cjs
+.pnp.loader.mjs
+.env
+apps/web/node_modules/
+apps/server/node_modules/
+apps/server/dist/
+apps/web/.turbo/
+apps/server/.turbo/
+.DS_Store
+.vscode/
+.idea/
+.npmrc
+pnpm-lock.yaml

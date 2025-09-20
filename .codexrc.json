@@ -1,0 +1,20 @@
+{
+  "projectStyle": {
+    "framework": "vite-react",
+    "css": "tailwind",
+    "components": "shadcn"
+  },
+  "preview": {
+    "mode": "dev-server",
+    "url": "http://localhost:3000"
+  },
+  "applyPolicy": {
+    "autoApply": true,
+    "maxPatchLines": 80,
+    "requireApprovalFor": ["schema", "routes", "package.json"]
+  },
+  "git": {
+    "branchPrefix": "codex/",
+    "conventionalCommits": true
+  }
+}
