@@ -187,7 +187,7 @@ export function PreviewWorkspace() {
   }, [preview, selectedSelector]);
 
   return (
-    <section className="flex h-full flex-col gap-4">
+    <section className="flex h-full flex-col gap-4" data-tutorial-anchor="preview">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-300">{previewTitle}</h2>

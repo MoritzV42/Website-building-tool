@@ -66,10 +66,16 @@ npm run dev
 # UI: http://localhost:5173  (Backend auf 8787)
 ```
 
-**Projektordner verbinden:** In der UI → **Connect Repository** → Pfad wählen.
+**Projektordner verbinden:** In der UI → **Connect Repository**. Über den Button **Pfad auswählen** öffnest du den nativen Ordnerdialog (Windows/macOS/Linux); wähle immer den Git-Root, also den Ordner mit `.git`.
 
 * Wenn dein Projekt einen Dev‑Server hat (z. B. Vite/Next): URL eintragen (z. B. [http://localhost:3000](http://localhost:3000)).
 * Für statische Sites: Build‑Ordner (z. B. `dist/`) angeben.
+
+**GPT-Account verknüpfen:** In der linken Spalte findest du die Karte **„Codex mit GPT verbinden“**. Trage dort deinen GPT-API-Schlüssel ein (er wird lokal in `.env` gespeichert) oder entferne ihn später wieder. Ohne Schlüssel läuft der Builder lokal weiter – mit Schlüssel kann Codex deine Aufgaben mit deinem eigenen GPT-Konto ausführen.
+
+### Windows-Verknüpfung & Icon
+
+`StartWebsiteBuilder.py` erstellt beim Start eine Verknüpfung **„Codex Website Builder.lnk“** im Projektordner und legt dafür automatisch das Icon `assets/codex-launcher.ico` aus der Textdatei `assets/codex-launcher.ico.b64` an. Du kannst die Verknüpfung an die Taskleiste pinnen oder das Icon nach Bedarf austauschen, indem du die generierte `.ico`-Datei ersetzt.
 
 ---
 

@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Language } from "../data/translations";
-import { connectRepository, fetchGitStatus } from "../services/api";
+import { connectRepository, fetchGitStatus, selectRepositoryDirectory } from "../services/api";
 import useEditorStore from "../state/useEditorStore";
 import { useTranslation } from "../hooks/useTranslation";
 
@@ -29,7 +29,14 @@ export function TopBar() {
 
   const [pathInput, setPathInput] = useState(repositoryPath ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPicking, setIsPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (repositoryPath) {
+      setPathInput(repositoryPath);
+    }
+  }, [repositoryPath]);
 
   const branchLabel = useMemo(() => {
     if (!gitStatus) return "";
@@ -41,11 +48,12 @@ export function TopBar() {
 
   const handleConnect = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!pathInput) return;
+    const trimmedPath = pathInput.trim();
+    if (!trimmedPath) return;
     setIsSubmitting(true);
     setError(null);
     try {
-      const { repository } = await connectRepository(pathInput);
+      const { repository } = await connectRepository(trimmedPath);
       setRepositoryPath(repository);
       appendLog({ level: "info", message: topBar.connectLog(repository) });
       const status = await fetchGitStatus();
@@ -56,6 +64,23 @@ export function TopBar() {
       appendLog({ level: "error", message });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handlePickDirectory = async () => {
+    setIsPicking(true);
+    setError(null);
+    try {
+      const path = await selectRepositoryDirectory();
+      if (path) {
+        setPathInput(path);
+      }
+    } catch (err) {
+      const message = (err as Error).message || topBar.pickerError;
+      setError(message);
+      appendLog({ level: "error", message });
+    } finally {
+      setIsPicking(false);
     }
   };
 
@@ -82,20 +107,32 @@ export function TopBar() {
         <form
           onSubmit={handleConnect}
           className="flex w-full flex-col gap-3 rounded-xl border border-white/5 bg-slate-900/60 p-4 shadow-surface sm:flex-row sm:items-center"
+          data-tutorial-anchor="repository"
         >
           <div className="flex flex-1 flex-col gap-1">
             <label className="text-xs uppercase tracking-[0.3em] text-slate-400">{topBar.repositoryLabel}</label>
-            <input
-              className="w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 shadow-inner outline-none focus:border-codex-primary focus:ring-2 focus:ring-codex-primary/40"
-              placeholder={topBar.repositoryPlaceholder}
-              value={pathInput}
-              onChange={(event) => setPathInput(event.target.value)}
-            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                className="w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 shadow-inner outline-none focus:border-codex-primary focus:ring-2 focus:ring-codex-primary/40"
+                placeholder={topBar.repositoryPlaceholder}
+                value={pathInput}
+                onChange={(event) => setPathInput(event.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handlePickDirectory}
+                disabled={isPicking}
+                className="inline-flex items-center justify-center rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-codex-primary/50 hover:text-codex-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isPicking ? topBar.pickingDirectory : topBar.pickDirectory}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500">{topBar.repositoryHint}</p>
           </div>
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isPicking}
             className="inline-flex items-center justify-center rounded-lg bg-codex-primary px-4 py-2 text-sm font-semibold text-white shadow-surface transition hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting ? topBar.connecting : repositoryPath ? topBar.reconnect : topBar.connect}

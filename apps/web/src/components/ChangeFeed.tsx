@@ -25,7 +25,10 @@ export function ChangeFeed() {
   const { changeFeed } = translation;
 
   return (
-    <section className="flex h-full flex-col rounded-2xl border border-white/5 bg-slate-900/40 shadow-surface">
+    <section
+      className="flex h-full flex-col rounded-2xl border border-white/5 bg-slate-900/40 shadow-surface"
+      data-tutorial-anchor="change-feed"
+    >
       <Tabs.Root defaultValue="patches" className="flex h-full flex-col">
         <Tabs.List className="flex gap-2 border-b border-white/5 px-4 py-3 text-xs uppercase tracking-[0.3em] text-slate-400">
           <Tabs.Trigger
