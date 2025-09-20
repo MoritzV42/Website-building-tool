@@ -1,10 +1,17 @@
 import { create } from "zustand";
 import { samplePreviewHtml } from "../data/samplePreview";
+import type { Language } from "../data/translations";
 import type { ChangeLogEntry, GitStatusSummary, PatchEvent, Task } from "../types";
 
 const DEFAULT_SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:8787";
 
+const DEFAULT_LANGUAGE: Language =
+  typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("de")
+    ? "de"
+    : "en";
+
 interface EditorState {
+  language: Language;
   serverUrl: string;
   wsUrl: string;
   repositoryPath: string | null;
@@ -17,6 +24,7 @@ interface EditorState {
   isPickerActive: boolean;
   previewHtml: string;
   websocketReady: boolean;
+  setLanguage(language: Language): void;
   setServerUrl(url: string): void;
   setRepositoryPath(path: string | null): void;
   setGitStatus(status: GitStatusSummary | null): void;
@@ -32,6 +40,7 @@ interface EditorState {
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
+  language: DEFAULT_LANGUAGE,
   serverUrl: DEFAULT_SERVER_URL,
   wsUrl: DEFAULT_SERVER_URL.replace(/^http/, "ws"),
   repositoryPath: null,
@@ -44,6 +53,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   isPickerActive: false,
   previewHtml: samplePreviewHtml,
   websocketReady: false,
+  setLanguage: (language) => set({ language }),
   setServerUrl: (url) => {
     set({
       serverUrl: url,

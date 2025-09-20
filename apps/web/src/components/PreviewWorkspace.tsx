@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildStableSelector } from "../lib/selectors";
 import useEditorStore from "../state/useEditorStore";
+import { useTranslation } from "../hooks/useTranslation";
 
 function formatSelectorLabel(selector: string) {
   return selector.length > 72 ? `${selector.slice(0, 72)}…` : selector;
@@ -11,6 +12,8 @@ export function PreviewWorkspace() {
   const hoverOverlayRef = useRef<HTMLDivElement | null>(null);
   const selectionOverlayRef = useRef<HTMLDivElement | null>(null);
 
+  const translation = useTranslation();
+  const { preview } = translation;
   const previewHtml = useEditorStore((state) => state.previewHtml);
   const isPickerActive = useEditorStore((state) => state.isPickerActive);
   const setPickerActive = useEditorStore((state) => state.setPickerActive);
@@ -179,18 +182,16 @@ export function PreviewWorkspace() {
   }, [ensureOverlays, selectedSelector, iframeKey]);
 
   const previewTitle = useMemo(() => {
-    if (!selectedSelector) return "Live Preview";
-    return `Live Preview • ${selectedSelector}`;
-  }, [selectedSelector]);
+    if (!selectedSelector) return preview.title;
+    return preview.titleWithSelector(selectedSelector);
+  }, [preview, selectedSelector]);
 
   return (
     <section className="flex h-full flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-300">{previewTitle}</h2>
-          <p className="text-xs text-slate-400">
-            Hover to inspect the preview. Activate the picker to capture a stable selector.
-          </p>
+          <p className="text-xs text-slate-400">{preview.description}</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -202,14 +203,14 @@ export function PreviewWorkspace() {
                 : "bg-slate-800/70 text-slate-100 hover:bg-slate-700/70"
             }`}
           >
-            {isPickerActive ? "Picking… click element" : "Element Picker"}
+            {isPickerActive ? preview.pickerActive : preview.pickerInactive}
           </button>
           <button
             type="button"
             onClick={() => setIframeKey((prev) => prev + 1)}
             className="rounded-lg bg-slate-800/70 px-4 py-2 text-sm font-semibold text-slate-100 shadow-surface hover:bg-slate-700/70"
           >
-            Refresh Preview
+            {preview.refresh}
           </button>
         </div>
       </div>
@@ -225,7 +226,7 @@ export function PreviewWorkspace() {
         />
         {(hoverLabel || selectedSelector) && (
           <div className="pointer-events-none absolute bottom-4 right-4 max-w-[60%] rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-xs text-slate-200 shadow-lg">
-            <p className="font-semibold text-slate-100">{hoverLabel ? "Hover" : "Selected"}</p>
+            <p className="font-semibold text-slate-100">{hoverLabel ? preview.badgeHover : preview.badgeSelected}</p>
             <p className="truncate text-slate-300" title={hoverLabel ?? selectedSelector ?? undefined}>
               {formatSelectorLabel(hoverLabel ?? selectedSelector ?? "")}
             </p>
