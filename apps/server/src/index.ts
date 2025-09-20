@@ -54,12 +54,25 @@ interface PatchEvent {
   diff: string;
   note?: string;
   createdAt: number;
+  status: PatchStatus;
+  resolvedAt: number | null;
+  appliedAt: number | null;
 }
+
+interface PatchRecord {
+  patch: PatchEvent;
+  mutatedContent: string;
+  revertSnapshot: { existed: boolean; content: string | null } | null;
+}
+
+type PatchStatus = "pending" | "applied" | "discarded" | "reverted";
 
 type ServerEvent =
   | { type: "task:created"; task: Task }
   | { type: "task:updated"; task: Task }
   | { type: "patch"; patch: PatchEvent }
+  | { type: "patch:updated"; patch: PatchEvent }
+  | { type: "patch:bootstrap"; patches: PatchEvent[] }
   | { type: "workspace:file"; path: string; change: "add" | "change" | "unlink" }
   | { type: "workspace:ready"; repository: string }
   | { type: "task:bootstrap"; tasks: Task[] };
@@ -156,6 +169,36 @@ class WorkspaceManager {
       throw error;
     }
   }
+
+  async readRepositoryFile(relative: string) {
+    const source = path.join(this.repoPath, relative);
+    try {
+      const content = await fsp.readFile(source, "utf8");
+      return { content, exists: true };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { content: "", exists: false };
+      }
+      throw error;
+    }
+  }
+
+  async writeRepositoryFile(relative: string, content: string) {
+    const destination = path.join(this.repoPath, relative);
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    await fsp.writeFile(destination, content, "utf8");
+  }
+
+  async deleteRepositoryFile(relative: string) {
+    const target = path.join(this.repoPath, relative);
+    try {
+      await fsp.unlink(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
 }
 
 interface CommandOptions {
@@ -163,29 +206,110 @@ interface CommandOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-async function runCommand(command: string, args: string[], options: CommandOptions = {}) {
-  return await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
-    const child = spawn(command, args, {
-      windowsHide: true,
-      cwd: options.cwd,
-      env: options.env
-    });
-    let stdout = "";
-    let stderr = "";
+function uniqueValues<T>(values: T[]): T[] {
+  const result: T[] = [];
+  const seen = new Set<T>();
+  for (const value of values) {
+    if (!seen.has(value)) {
+      seen.add(value);
+      result.push(value);
+    }
+  }
+  return result;
+}
 
-    child.stdout?.on("data", (data) => {
-      stdout += data.toString();
-    });
-    child.stderr?.on("data", (data) => {
-      stderr += data.toString();
-    });
-    child.on("error", (error) => {
-      reject(error);
-    });
-    child.on("close", (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
-    });
+function expandAsarAwareCandidates(target: string) {
+  const candidates = [target];
+  if (target.includes(".asar")) {
+    const parts = target.split(path.sep);
+    const index = parts.findIndex((segment) => segment.endsWith(".asar"));
+    if (index !== -1) {
+      const unpackedParts = [...parts];
+      unpackedParts[index] = `${parts[index]}.unpacked`;
+      candidates.unshift(path.join(...unpackedParts));
+    }
+  }
+  return uniqueValues(candidates);
+}
+
+async function runCommand(command: string, args: string[], options: CommandOptions = {}) {
+  const env = options.env ?? process.env;
+  const commandCandidates = expandAsarAwareCandidates(command);
+  const rawCwdCandidates: Array<string | undefined> = [
+    ...(options.cwd ? expandAsarAwareCandidates(options.cwd) : []),
+    undefined,
+    process.cwd(),
+    path.dirname(process.execPath),
+    os.homedir()
+  ];
+  const cwdCandidates = uniqueValues(rawCwdCandidates).filter((candidate) => {
+    if (candidate === undefined) {
+      return true;
+    }
+    try {
+      return fs.existsSync(candidate);
+    } catch {
+      return false;
+    }
   });
+
+  const spawnOnce = (cmd: string, cwd: string | undefined) =>
+    new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
+      const child = spawn(cmd, args, {
+        windowsHide: process.platform === "win32",
+        cwd,
+        env
+      });
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
+      child.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
+      child.on("error", (error) => {
+        reject(error);
+      });
+      child.on("close", (code) => {
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
+      });
+    });
+
+  let lastSpawnError: NodeJS.ErrnoException | null = null;
+
+  for (const candidateCommand of commandCandidates) {
+    for (const candidateCwd of cwdCandidates) {
+      try {
+        return await spawnOnce(candidateCommand, candidateCwd);
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code === "EINVAL") {
+          lastSpawnError = err;
+          continue;
+        }
+        if (err.code === "ENOENT") {
+          lastSpawnError = err;
+          break;
+        }
+        throw error;
+      }
+    }
+  }
+
+  if (lastSpawnError) {
+    if (lastSpawnError.code === "EINVAL") {
+      const detailedError = new Error(
+        "OpenAI-Login konnte nicht gestartet werden. Bitte stelle sicher, dass die OpenAI-CLI installiert ist und Codex auf das Benutzerverzeichnis zugreifen kann."
+      );
+      (detailedError as NodeJS.ErrnoException).code = lastSpawnError.code;
+      throw detailedError;
+    }
+    throw lastSpawnError;
+  }
+
+  throw new Error(`Fehler beim Starten von ${path.basename(command)}.`);
 }
 
 async function openDirectoryPicker(): Promise<string | null> {
@@ -387,8 +511,10 @@ function resolveOpenAiCliPath() {
     path.join(path.resolve(SERVER_CWD, "..", ".."), "node_modules", ".bin", OPENAI_CLI_BIN)
   ];
   for (const candidate of candidates) {
-    if (candidate && fs.existsSync(candidate)) {
-      return candidate;
+    for (const resolved of expandAsarAwareCandidates(candidate)) {
+      if (resolved && fs.existsSync(resolved)) {
+        return resolved;
+      }
     }
   }
   throw new Error(
@@ -474,17 +600,119 @@ async function loginWithOpenAiCli(profile: string) {
   if (profile && profile !== "default") {
     args.push("--profile", profile);
   }
-  const { exitCode, stderr, stdout } = await runCommand(cliPath, args, { cwd: SERVER_CWD, env: process.env });
-  if (exitCode !== 0) {
-    throw new Error(stderr || stdout || "OpenAI-Login fehlgeschlagen.");
-  }
-  const key = await readOpenAiCliKey(profile);
-  if (!key) {
-    throw new Error(
-      "Die Anmeldung wurde abgeschlossen, aber es wurde kein API-Schlüssel gefunden. Bitte versuche es erneut oder lege den Schlüssel manuell fest."
-    );
-  }
-  return key;
+  return await new Promise<string>((resolve, reject) => {
+    const child = spawn(cliPath, args, {
+      cwd: SERVER_CWD,
+      env: { ...process.env, OPENAI_CLI_NO_COLOR: "1" },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let buffer = "";
+    let settled = false;
+    const responded = new Set<number>();
+
+    const autoPrompts: RegExp[] = [
+      /press\s+(enter|return)\s+to\s+(continue|open|finish)/i,
+      /\(y\/n\)/i,
+      /\[y\/n\]/i,
+      /\(yes\/no\)/i,
+      /möchtest du fortfahren\?/i,
+      /would you like to continue\?/i
+    ];
+
+    const respond = (value = "") => {
+      if (!child.stdin || child.stdin.destroyed) {
+        return;
+      }
+      child.stdin.write(`${value}\n`);
+    };
+
+    const inspectBuffer = () => {
+      for (const [index, pattern] of autoPrompts.entries()) {
+        if (responded.has(index)) {
+          continue;
+        }
+        if (pattern.test(buffer)) {
+          responded.add(index);
+          respond();
+        }
+      }
+      const trailingLine = buffer.split(/\r?\n/).pop();
+      if (trailingLine && trailingLine.trim().endsWith("?")) {
+        respond();
+      }
+    };
+
+    child.stdout?.on("data", (data) => {
+      const text = data.toString();
+      stdout += text;
+      buffer = `${buffer}${text}`.slice(-2000);
+      inspectBuffer();
+    });
+
+    child.stderr?.on("data", (data) => {
+      const text = data.toString();
+      stderr += text;
+      buffer = `${buffer}${text}`.slice(-2000);
+      inspectBuffer();
+    });
+
+    let fallbackCount = 0;
+    const fallbackInterval = setInterval(() => {
+      if (child.exitCode === null && fallbackCount < 8) {
+        fallbackCount += 1;
+        respond();
+      } else if (child.exitCode !== null || fallbackCount >= 8) {
+        clearInterval(fallbackInterval);
+      }
+    }, 1500);
+
+    const initialKick = setTimeout(() => {
+      if (child.exitCode === null) {
+        respond();
+      }
+    }, 400);
+
+    const finalize = (error?: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearInterval(fallbackInterval);
+      clearTimeout(initialKick);
+      if (error) {
+        reject(error);
+      }
+    };
+
+    child.on("error", (error) => {
+      finalize(error as Error);
+    });
+
+    child.on("close", async (code) => {
+      if (code !== 0) {
+        finalize(new Error(stderr.trim() || stdout.trim() || "OpenAI-Login fehlgeschlagen."));
+        return;
+      }
+      try {
+        const key = await readOpenAiCliKey(profile);
+        if (!key) {
+          finalize(
+            new Error(
+              "Die Anmeldung wurde abgeschlossen, aber es wurde kein API-Schlüssel gefunden. Bitte versuche es erneut oder lege den Schlüssel manuell fest."
+            )
+          );
+          return;
+        }
+        finalize();
+        resolve(key);
+      } catch (error) {
+        finalize(error as Error);
+      }
+    });
+  });
 }
 
 const app = express();
@@ -493,6 +721,13 @@ const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 const clients = new Set<WebSocket>();
 const workspace = new WorkspaceManager(SERVER_CWD, DEFAULT_SHADOW_PATH);
 const tasks: Task[] = [];
+const patchRecords = new Map<string, PatchRecord>();
+
+function getPatchesSnapshot() {
+  return Array.from(patchRecords.values())
+    .map((record) => record.patch)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
 
 app.use(cors());
 app.use(bodyParser.json({ limit: "2mb" }));
@@ -589,6 +824,33 @@ app.post("/api/settings/openai/login", async (req, res) => {
   }
 });
 
+app.post("/api/patches/:id/apply", async (req, res) => {
+  try {
+    const patch = await applyPatchById(req.params.id);
+    res.json(patch);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+});
+
+app.post("/api/patches/:id/reject", async (req, res) => {
+  try {
+    const patch = await rejectPatchById(req.params.id);
+    res.json(patch);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+});
+
+app.post("/api/patches/:id/revert", async (req, res) => {
+  try {
+    const patch = await revertPatchById(req.params.id);
+    res.json(patch);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+});
+
 app.post("/api/tasks", async (req, res) => {
   const payload = req.body as TaskRequest;
   if (!payload?.selector || !payload?.goal) {
@@ -618,6 +880,7 @@ wss.on("connection", (socket) => {
   clients.add(socket);
   socket.on("close", () => clients.delete(socket));
   socket.send(JSON.stringify({ type: "workspace:ready", repository: workspace.getRepositoryPath() } satisfies ServerEvent));
+  socket.send(JSON.stringify({ type: "patch:bootstrap", patches: getPatchesSnapshot() } satisfies ServerEvent));
   socket.send(JSON.stringify({ type: "task:bootstrap", tasks }));
 });
 
@@ -630,12 +893,20 @@ function broadcast(event: ServerEvent) {
   }
 }
 
+function notifyPatchCreated(patch: PatchEvent) {
+  broadcast({ type: "patch", patch });
+}
+
+function notifyPatchUpdated(patch: PatchEvent) {
+  broadcast({ type: "patch:updated", patch });
+}
+
 async function processTask(task: Task) {
   task.status = "processing";
   broadcast({ type: "task:updated", task });
 
   const file = task.files?.[0] ?? "src/App.tsx";
-  const original = await workspace.readSourceFile(file);
+  const { content: original } = await workspace.readRepositoryFile(file);
   const mutated = synthesizeChange(original, task);
   const diff = createTwoFilesPatch(file, file, original, mutated, "", "");
 
@@ -647,12 +918,73 @@ async function processTask(task: Task) {
     file,
     diff,
     note: `Applied goal: ${task.goal}`,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    status: "pending",
+    resolvedAt: null,
+    appliedAt: null
   };
-  broadcast({ type: "patch", patch });
+  patchRecords.set(patch.id, {
+    patch,
+    mutatedContent: mutated,
+    revertSnapshot: null
+  });
+  notifyPatchCreated(patch);
 
   task.status = "completed";
   broadcast({ type: "task:updated", task });
+}
+
+function requirePatchRecord(patchId: string) {
+  const record = patchRecords.get(patchId);
+  if (!record) {
+    throw new Error(`Patch ${patchId} wurde nicht gefunden.`);
+  }
+  return record;
+}
+
+async function applyPatchById(patchId: string) {
+  const record = requirePatchRecord(patchId);
+  const snapshot = await workspace.readRepositoryFile(record.patch.file);
+  record.revertSnapshot = { existed: snapshot.exists, content: snapshot.exists ? snapshot.content : null };
+  await workspace.writeRepositoryFile(record.patch.file, record.mutatedContent);
+  const timestamp = Date.now();
+  record.patch.status = "applied";
+  record.patch.appliedAt = timestamp;
+  record.patch.resolvedAt = timestamp;
+  notifyPatchUpdated(record.patch);
+  return record.patch;
+}
+
+async function rejectPatchById(patchId: string) {
+  const record = requirePatchRecord(patchId);
+  if (record.patch.status === "applied") {
+    throw new Error("Patch ist bereits übernommen. Bitte mache ihn zuerst rückgängig.");
+  }
+  record.revertSnapshot = null;
+  const timestamp = Date.now();
+  record.patch.status = "discarded";
+  record.patch.resolvedAt = timestamp;
+  notifyPatchUpdated(record.patch);
+  return record.patch;
+}
+
+async function revertPatchById(patchId: string) {
+  const record = requirePatchRecord(patchId);
+  if (record.patch.status !== "applied" || !record.revertSnapshot) {
+    throw new Error("Patch wurde noch nicht übernommen oder wurde bereits zurückgesetzt.");
+  }
+  const { existed, content } = record.revertSnapshot;
+  if (existed) {
+    await workspace.writeRepositoryFile(record.patch.file, content ?? "");
+  } else {
+    await workspace.deleteRepositoryFile(record.patch.file);
+  }
+  record.revertSnapshot = null;
+  const timestamp = Date.now();
+  record.patch.status = "reverted";
+  record.patch.resolvedAt = timestamp;
+  notifyPatchUpdated(record.patch);
+  return record.patch;
 }
 
 function synthesizeChange(source: string, task: Task) {

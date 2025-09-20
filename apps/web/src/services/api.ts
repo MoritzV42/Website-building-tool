@@ -1,4 +1,4 @@
-import type { GitStatusSummary, OpenAiStatus, Task } from "../types";
+import type { GitStatusSummary, OpenAiStatus, PatchEvent, Task } from "../types";
 import useEditorStore from "../state/useEditorStore";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -59,4 +59,16 @@ export async function disconnectOpenAi() {
   return request<OpenAiStatus>("/api/settings/openai", {
     method: "DELETE"
   });
+}
+
+export async function applyPatch(patchId: string) {
+  return request<PatchEvent>(`/api/patches/${patchId}/apply`, { method: "POST" });
+}
+
+export async function rejectPatch(patchId: string) {
+  return request<PatchEvent>(`/api/patches/${patchId}/reject`, { method: "POST" });
+}
+
+export async function revertPatch(patchId: string) {
+  return request<PatchEvent>(`/api/patches/${patchId}/revert`, { method: "POST" });
 }

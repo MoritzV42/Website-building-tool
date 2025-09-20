@@ -8,7 +8,8 @@ export function useServerConnection() {
   const setRepositoryPath = useEditorStore((state) => state.setRepositoryPath);
   const upsertTask = useEditorStore((state) => state.upsertTask);
   const resetTasks = useEditorStore((state) => state.resetTasks);
-  const pushPatch = useEditorStore((state) => state.pushPatch);
+  const setPatches = useEditorStore((state) => state.setPatches);
+  const upsertPatch = useEditorStore((state) => state.upsertPatch);
   const appendLog = useEditorStore((state) => state.appendLog);
   const setWebsocketReady = useEditorStore((state) => state.setWebsocketReady);
 
@@ -45,12 +46,23 @@ export function useServerConnection() {
             upsertTask(payload.task);
             break;
           case "patch":
-            pushPatch(payload.patch);
+            upsertPatch(payload.patch);
             appendLog({
               level: "info",
               message: `Patch generated for ${payload.patch.file}`,
               createdAt: payload.patch.createdAt
             });
+            break;
+          case "patch:updated":
+            upsertPatch(payload.patch);
+            appendLog({
+              level: "info",
+              message: `Patch ${payload.patch.status} → ${payload.patch.file}`,
+              createdAt: payload.patch.resolvedAt ?? Date.now()
+            });
+            break;
+          case "patch:bootstrap":
+            setPatches(payload.patches);
             break;
           case "workspace:file":
             appendLog({
@@ -67,5 +79,5 @@ export function useServerConnection() {
     return () => {
       socket.close();
     };
-  }, [appendLog, pushPatch, resetTasks, serverUrl, setRepositoryPath, setWebsocketReady, upsertTask, wsUrl]);
+  }, [appendLog, resetTasks, serverUrl, setPatches, setRepositoryPath, setWebsocketReady, upsertPatch, upsertTask, wsUrl]);
 }
