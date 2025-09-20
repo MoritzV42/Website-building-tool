@@ -48,9 +48,15 @@ export async function fetchOpenAiStatus() {
   return request<OpenAiStatus>("/api/settings/openai");
 }
 
-export async function updateOpenAiKey(apiKey: string) {
-  return request<OpenAiStatus>("/api/settings/openai", {
+export async function loginWithOpenAi(profile?: string) {
+  return request<OpenAiStatus>("/api/settings/openai/login", {
     method: "POST",
-    body: JSON.stringify({ apiKey })
+    body: JSON.stringify(profile ? { profile } : {})
+  });
+}
+
+export async function disconnectOpenAi() {
+  return request<OpenAiStatus>("/api/settings/openai", {
+    method: "DELETE"
   });
 }

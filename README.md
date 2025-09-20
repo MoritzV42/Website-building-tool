@@ -18,6 +18,7 @@
 * 🧪 **Playground‑Checks**: Lint/Typecheck/Tests vor dem Commit (optional, schnell).
 * 🌱 **Git‑Flow**: Feature‑Branch, Commits mit AI‑Message, Push, Auto‑PR via GitHub API.
 * 🔒 **Local‑first**: Läuft offline; externe LLM‑Calls optional über CLI‑Adapter.
+* 🖥️ **Desktop-Shell**: Electron-App bündelt Frontend & Backend inklusive integriertem GPT-Login per CLI.
 
 ---
 
@@ -61,9 +62,9 @@ cd codex-site-editor
 npm install   # installiert Root + Workspaces
 cp .env.example .env   # GITHUB_TOKEN optional
 
-# 3) Dev-Server
-npm run dev
-# UI: http://localhost:5173  (Backend auf 8787)
+# 3) Desktop-App
+npm run dev:desktop
+# Öffnet die Electron-App (Frontend + Backend laufen lokal)
 ```
 
 **Projektordner verbinden:** In der UI → **Connect Repository**. Über den Button **Pfad auswählen** öffnest du den nativen Ordnerdialog (Windows/macOS/Linux); wähle immer den Git-Root, also den Ordner mit `.git`.
@@ -71,11 +72,11 @@ npm run dev
 * Wenn dein Projekt einen Dev‑Server hat (z. B. Vite/Next): URL eintragen (z. B. [http://localhost:3000](http://localhost:3000)).
 * Für statische Sites: Build‑Ordner (z. B. `dist/`) angeben.
 
-**GPT-Account verknüpfen:** In der linken Spalte findest du die Karte **„Codex mit GPT verbinden“**. Trage dort deinen GPT-API-Schlüssel ein (er wird lokal in `.env` gespeichert) oder entferne ihn später wieder. Ohne Schlüssel läuft der Builder lokal weiter – mit Schlüssel kann Codex deine Aufgaben mit deinem eigenen GPT-Konto ausführen.
+**GPT-Account verknüpfen:** In der rechten Spalte findest du die Karte **„Codex mit GPT verbinden“**. Ein Klick auf **„Mit GPT anmelden“** startet `openai login` direkt aus der App, öffnet den offiziellen Browser-Flow und speichert den Token ausschließlich in deinem Codex-Profil (`%APPDATA%/…` bzw. `~/Library/Application Support/`). Du kannst die Verbindung jederzeit neu herstellen oder trennen – der Token verlässt nie deinen Rechner.
 
 ### Windows-Verknüpfung & Icon
 
-`StartWebsiteBuilder.py` erstellt beim Start eine Verknüpfung **„Codex Website Builder.lnk“** im Projektordner und legt dafür automatisch das Icon `assets/codex-launcher.ico` aus der Textdatei `assets/codex-launcher.ico.b64` an. Du kannst die Verknüpfung an die Taskleiste pinnen oder das Icon nach Bedarf austauschen, indem du die generierte `.ico`-Datei ersetzt.
+`StartWebsiteBuilder.py` erstellt beim Start eine Verknüpfung **„Codex Website Builder.lnk“** im Projektordner, legt automatisch das Icon `assets/codex-launcher.ico` aus der Textdatei `assets/codex-launcher.ico.b64` an **und startet die Desktop-App (`npm run dev:desktop`)**. Du kannst die Verknüpfung an die Taskleiste pinnen oder das Icon nach Bedarf austauschen, indem du die generierte `.ico`-Datei ersetzt.
 
 ---
 
@@ -194,6 +195,7 @@ GITHUB_DEFAULT_BASE=main
 /apps
   /server   (Express + WS Backend für JSON-RPC, Repo- und Git-Adapter)
   /web      (Vite + React UI inkl. Element-Picker & Diff-Panel)
+  /desktop  (Electron-Shell, CLI-Login, Packaging)
 /package.json (Workspaces & gemeinsame Scripts)
 /.codexrc.json (Apply-Policy & Preview-Defaults)
 ```
@@ -202,11 +204,14 @@ GITHUB_DEFAULT_BASE=main
 
 | Command | Beschreibung |
 | --- | --- |
-| `npm run dev` | startet UI (`apps/web`) & Backend (`apps/server`) parallel |
+| `npm run dev:desktop` | startet die Electron-Shell inkl. Backend |
+| `npm run dev` | klassischer Browser-Dev-Server (UI & Backend getrennt) |
 | `npm run dev:web` | nur die Vite UI (Port 5173) |
 | `npm run dev:server` | nur den Node/WS Backend-Server (Port 8787) |
 | `npm run build` | UI bundlen + Server transpilieren |
+| `npm run build:desktop` | erstellt Desktop-Build (kopiert Web/Server in `apps/desktop/dist`) |
 | `npm run lint` | ESLint über Workspaces |
+| `npm run package:desktop` | erzeugt ein installierbares Electron-Paket |
 
 ---
 

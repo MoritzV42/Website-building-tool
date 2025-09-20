@@ -28,6 +28,7 @@ interface EditorState {
   tutorialVisible: boolean;
   tutorialStep: number;
   tutorialCompleted: boolean;
+  tutorialCollapsed: boolean;
   setLanguage(language: Language): void;
   setServerUrl(url: string): void;
   setRepositoryPath(path: string | null): void;
@@ -47,11 +48,14 @@ interface EditorState {
   closeTutorial(): void;
   completeTutorial(): void;
   restartTutorial(): void;
+  setTutorialCollapsed(collapsed: boolean): void;
 }
 
 const TUTORIAL_STORAGE_KEY = "codex.tutorial";
+const TUTORIAL_CARD_STORAGE_KEY = "codex.tutorial.card";
 const hasWindow = typeof window !== "undefined";
 const storedTutorialState = hasWindow ? window.localStorage.getItem(TUTORIAL_STORAGE_KEY) : null;
+const storedTutorialCardState = hasWindow ? window.localStorage.getItem(TUTORIAL_CARD_STORAGE_KEY) : null;
 
 export const useEditorStore = create<EditorState>((set) => ({
   language: DEFAULT_LANGUAGE,
@@ -67,10 +71,11 @@ export const useEditorStore = create<EditorState>((set) => ({
   isPickerActive: false,
   previewHtml: samplePreviewHtml,
   websocketReady: false,
-  openAiStatus: { configured: false, maskedKey: null },
+  openAiStatus: { connected: false, method: null, label: null, maskedKey: null, profile: null, updatedAt: null },
   tutorialVisible: false,
   tutorialStep: 0,
   tutorialCompleted: storedTutorialState === "completed",
+  tutorialCollapsed: storedTutorialCardState === "collapsed",
   setLanguage: (language) => set({ language }),
   setServerUrl: (url) => {
     set({
@@ -118,7 +123,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(TUTORIAL_STORAGE_KEY);
       }
-      return { tutorialVisible: true, tutorialStep: 0, tutorialCompleted: false };
+      return { tutorialVisible: true, tutorialStep: 0, tutorialCompleted: false, tutorialCollapsed: false };
     }),
   setTutorialStep: (step) => set({ tutorialStep: step }),
   closeTutorial: () => set({ tutorialVisible: false }),
@@ -134,7 +139,14 @@ export const useEditorStore = create<EditorState>((set) => ({
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(TUTORIAL_STORAGE_KEY);
       }
-      return { tutorialStep: 0, tutorialVisible: true, tutorialCompleted: false };
+      return { tutorialStep: 0, tutorialVisible: true, tutorialCompleted: false, tutorialCollapsed: false };
+    }),
+  setTutorialCollapsed: (collapsed) =>
+    set(() => {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(TUTORIAL_CARD_STORAGE_KEY, collapsed ? "collapsed" : "expanded");
+      }
+      return { tutorialCollapsed: collapsed };
     })
 }));
 

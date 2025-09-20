@@ -95,17 +95,26 @@ interface Translation {
   openAi: {
     title: string;
     description: string;
-    placeholder: string;
-    connect: string;
-    connecting: string;
-    replace: string;
-    clear: string;
-    cancel: string;
     helper: string;
     docsLabel: string;
-    statusConnected: (masked: string) => string;
+    login: string;
+    loggingIn: string;
+    reconnect: string;
+    disconnect: string;
+    disconnecting: string;
+    loginHint: string;
+    loginDetails: string;
+    statusConnected: (label: string) => string;
+    statusMasked: (masked: string) => string;
     statusMissing: string;
-    errorEmpty: string;
+    cliProfile: (profile: string) => string;
+  };
+  deployPanel: {
+    title: string;
+    description: string;
+    steps: string[];
+    button: string;
+    helper: string;
   };
 }
 
@@ -211,9 +220,9 @@ export const translations: Record<Language, Translation> = {
           {
             heading: "4. Link your GPT account",
             bullets: [
-              "Add your GPT API key in the \"Connect Codex to GPT\" card to let Codex draft tasks with your own account.",
-              "Keys are stored locally in your .env file and never leave your machine.",
-              "You can remove or rotate the key at any time from the same panel."
+              "Use the \"Connect Codex to GPT\" card to run the OpenAI CLI login and link your account.",
+              "The generated token stays on your machine inside your Codex profile.",
+              "You can disconnect or refresh the login at any time from the same panel."
             ]
           }
         ],
@@ -261,7 +270,7 @@ export const translations: Record<Language, Translation> = {
             anchor: "gpt-connect",
             heading: "Link Codex to GPT",
             description:
-              "Paste your GPT API key, save it locally, and you're ready to draft tasks with your own account.",
+              "Run the OpenAI CLI login from here. Codex keeps the token local so your prompts use your own account.",
             placement: "right"
           }
         ]
@@ -269,18 +278,33 @@ export const translations: Record<Language, Translation> = {
     },
     openAi: {
       title: "Connect Codex to GPT",
-      description: "Codex uses your GPT account to generate code. Add your API key once and it stays on your machine.",
-      placeholder: "sk-...",
-      connect: "Save API key",
-      connecting: "Saving…",
-      replace: "Replace key",
-      clear: "Remove key",
-      cancel: "Cancel",
-      helper: "Keys are written to .env in this repository. Restart the dev server after rotating credentials.",
-      docsLabel: "Open setup guide",
-      statusConnected: (masked) => `Connected • ${masked}`,
+      description:
+        "Sign in once with the OpenAI CLI. Codex stores the token locally and reuses it for your coding sessions.",
+      helper: "The login command runs locally; no credentials ever leave your machine.",
+      docsLabel: "Open CLI guide",
+      login: "Sign in with GPT",
+      loggingIn: "Waiting for login…",
+      reconnect: "Reconnect GPT account",
+      disconnect: "Disconnect",
+      disconnecting: "Disconnecting…",
+      loginHint: "A browser window opens with the official OpenAI login flow.",
+      loginDetails: "After finishing the flow the CLI stores a short-lived API key in ~/.config/openai/config.yaml.",
+      statusConnected: (label: string) => `Connected • ${label}`,
+      statusMasked: (masked: string) => `Token ${masked}`,
       statusMissing: "Not connected yet",
-      errorEmpty: "Enter your API key before saving."
+      cliProfile: (profile: string) => `Linked via OpenAI CLI profile “${profile}”`
+    },
+    deployPanel: {
+      title: "Deploy",
+      description: "Share your work by publishing the generated site to Netlify.",
+      steps: [
+        "Run `npm run build` in your website repository to create the production folder (for example `dist/`).",
+        "Create a Netlify site and choose \"Deploy manually\" as the method.",
+        "Upload the build folder or run `netlify deploy --dir dist` to generate a shareable preview.",
+        "When everything looks right, promote the preview to production inside Netlify."
+      ],
+      button: "Open Netlify deploy guide",
+      helper: "The linked guide walks through connecting the folder and sharing the preview URL."
     }
   },
   de: {
@@ -384,9 +408,9 @@ export const translations: Record<Language, Translation> = {
           {
             heading: "4. GPT-Account verknüpfen",
             bullets: [
-              "Hinterlege deinen GPT-API-Schlüssel im Panel \"Codex mit GPT verbinden\".",
-              "Der Schlüssel bleibt lokal in deiner .env-Datei und verlässt deinen Rechner nicht.",
-              "Du kannst den Schlüssel jederzeit austauschen oder entfernen."
+              "Starte im Panel \"Codex mit GPT verbinden\" den OpenAI-CLI-Login.",
+              "Der erzeugte Token bleibt lokal in deinem Codex-Profil.",
+              "Du kannst die Verbindung jederzeit neu aufbauen oder trennen."
             ]
           }
         ],
@@ -433,7 +457,7 @@ export const translations: Record<Language, Translation> = {
             id: "gpt-connect",
             anchor: "gpt-connect",
             heading: "GPT verbinden",
-            description: "Trage deinen GPT-Schlüssel ein, speichere ihn lokal und nutze Codex mit deinem Account.",
+            description: "Starte hier den OpenAI-CLI-Login. Codex nutzt den Token lokal für deine eigenen Prompts.",
             placement: "right"
           }
         ]
@@ -441,18 +465,32 @@ export const translations: Record<Language, Translation> = {
     },
     openAi: {
       title: "Codex mit GPT verbinden",
-      description: "Codex nutzt deinen GPT-Account für Code-Vorschläge. Der Schlüssel bleibt lokal auf deinem Rechner.",
-      placeholder: "sk-...",
-      connect: "API-Schlüssel speichern",
-      connecting: "Speichere…",
-      replace: "Schlüssel ersetzen",
-      clear: "Schlüssel entfernen",
-      cancel: "Abbrechen",
-      helper: "Der Schlüssel wird in der .env dieses Repositories abgelegt. Nach Änderungen den Dev-Server neu starten.",
-      docsLabel: "Anleitung öffnen",
-      statusConnected: (masked) => `Verbunden • ${masked}`,
+      description: "Melde dich einmal über die OpenAI-CLI an. Codex speichert den Token lokal und nutzt ihn für deine Sessions.",
+      helper: "Der Login läuft komplett lokal – der Token bleibt auf deinem Rechner.",
+      docsLabel: "CLI-Anleitung öffnen",
+      login: "Mit GPT anmelden",
+      loggingIn: "Warte auf Anmeldung…",
+      reconnect: "Neu verbinden",
+      disconnect: "Verbindung trennen",
+      disconnecting: "Trenne…",
+      loginHint: "Wir öffnen das offizielle OpenAI-Login im Browser.",
+      loginDetails: "Nach Abschluss legt die CLI den Schlüssel unter ~/.config/openai/config.yaml ab.",
+      statusConnected: (label: string) => `Verbunden • ${label}`,
+      statusMasked: (masked: string) => `Token ${masked}`,
       statusMissing: "Noch nicht verbunden",
-      errorEmpty: "Bitte gib vor dem Speichern einen API-Schlüssel ein."
+      cliProfile: (profile: string) => `Gekoppelt über CLI-Profil „${profile}“`
+    },
+    deployPanel: {
+      title: "Deploy",
+      description: "Veröffentliche deine generierte Site mit wenigen Klicks auf Netlify.",
+      steps: [
+        "Führe `npm run build` im Projekt aus und erhalte den Ordner `dist/`.",
+        "Erstelle auf Netlify eine neue Site und wähle \"Deploy manually\".",
+        "Ziehe den Build-Ordner per Drag & Drop hoch oder nutze `netlify deploy --dir dist` für ein Preview.",
+        "Wenn alles passt, promote das Preview direkt in Netlify auf Produktion."
+      ],
+      button: "Netlify-Anleitung öffnen",
+      helper: "Die verlinkte Anleitung erklärt Schritt für Schritt das Hochladen und Teilen des Preview-Links."
     }
   }
 };

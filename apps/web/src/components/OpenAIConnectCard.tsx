@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "../hooks/useTranslation";
-import { updateOpenAiKey } from "../services/api";
+import { disconnectOpenAi, loginWithOpenAi } from "../services/api";
 import useEditorStore from "../state/useEditorStore";
 
 export function OpenAIConnectCard() {
@@ -9,55 +9,52 @@ export function OpenAIConnectCard() {
   const setOpenAiStatus = useEditorStore((state) => state.setOpenAiStatus);
   const appendLog = useEditorStore((state) => state.appendLog);
 
-  const [apiKey, setApiKey] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasKey = openAiStatus.configured;
+  const docsUrl = "https://platform.openai.com/docs/guides/cli";
+  const hasConnection = openAiStatus.connected;
+  const connectionLabel = hasConnection
+    ? openAi.statusConnected(openAiStatus.label ?? openAi.statusMasked(openAiStatus.maskedKey ?? "••••"))
+    : openAi.statusMissing;
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!apiKey.trim()) {
-      setError(openAi.errorEmpty);
-      return;
-    }
-    setIsSaving(true);
+  const handleLogin = async () => {
+    setIsConnecting(true);
     setError(null);
     try {
-      const status = await updateOpenAiKey(apiKey.trim());
+      const status = await loginWithOpenAi();
       setOpenAiStatus(status);
-      setApiKey("");
-      setIsEditing(false);
       appendLog({
         level: "info",
-        message: status.configured && status.maskedKey ? openAi.statusConnected(status.maskedKey) : openAi.statusMissing
+        message: status.connected
+          ? openAi.statusConnected(status.label ?? openAi.statusMasked(status.maskedKey ?? "••••"))
+          : openAi.statusMissing
       });
     } catch (err) {
-      setError((err as Error).message);
-      appendLog({ level: "error", message: (err as Error).message });
+      const message = (err as Error).message;
+      setError(message);
+      appendLog({ level: "error", message });
     } finally {
-      setIsSaving(false);
+      setIsConnecting(false);
     }
   };
 
-  const handleClear = async () => {
-    setIsSaving(true);
+  const handleDisconnect = async () => {
+    setIsDisconnecting(true);
     setError(null);
     try {
-      const status = await updateOpenAiKey("");
+      const status = await disconnectOpenAi();
       setOpenAiStatus(status);
       appendLog({ level: "info", message: openAi.statusMissing });
     } catch (err) {
-      setError((err as Error).message);
-      appendLog({ level: "error", message: (err as Error).message });
+      const message = (err as Error).message;
+      setError(message);
+      appendLog({ level: "error", message });
     } finally {
-      setIsSaving(false);
-      setIsEditing(false);
+      setIsDisconnecting(false);
     }
   };
-
-  const docsUrl = "https://platform.openai.com/account/api-keys";
 
   return (
     <section
@@ -82,67 +79,37 @@ export function OpenAIConnectCard() {
         <p className="text-xs text-slate-500">{openAi.helper}</p>
       </div>
 
-      {hasKey && !isEditing ? (
-        <div className="flex flex-col gap-3">
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-            {openAi.statusConnected(openAiStatus.maskedKey ?? "••••")}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setIsEditing(true);
-                setError(null);
-              }}
-              className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-codex-primary/60 hover:text-codex-primary"
-            >
-              {openAi.replace}
-            </button>
-            <button
-              type="button"
-              onClick={handleClear}
-              disabled={isSaving}
-              className="rounded-lg border border-rose-500/40 px-3 py-2 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/10 disabled:opacity-60"
-            >
-              {openAi.clear}
-            </button>
-          </div>
+      <div className="flex flex-col gap-3">
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+          {connectionLabel}
         </div>
-      ) : (
-        <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-          <label className="text-[11px] uppercase tracking-[0.35em] text-slate-400">API Key</label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={openAi.placeholder}
-            className="rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 shadow-inner outline-none focus:border-codex-primary focus:ring-2 focus:ring-codex-primary/40"
-          />
-          {error && <p className="text-xs text-rose-300">{error}</p>}
+        {hasConnection && openAiStatus.method === "cli" && (
+          <p className="text-xs text-slate-400">{openAi.cliProfile(openAiStatus.profile ?? "default")}</p>
+        )}
+        {error && <p className="text-xs text-rose-300">{error}</p>}
+        <div className="flex flex-col gap-3">
+          {!hasConnection && <p className="text-xs text-slate-400">{openAi.loginHint}</p>}
           <div className="flex flex-wrap gap-2">
             <button
-              type="submit"
-              disabled={isSaving}
+              type="button"
+              onClick={handleLogin}
+              disabled={isConnecting || isDisconnecting}
               className="rounded-lg bg-codex-primary px-3 py-2 text-xs font-semibold text-white shadow-surface transition hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSaving ? openAi.connecting : openAi.connect}
+              {isConnecting ? openAi.loggingIn : hasConnection ? openAi.reconnect : openAi.login}
             </button>
-            {hasKey && (
-              <button
-                type="button"
-                onClick={() => {
-                  setIsEditing(false);
-                  setApiKey("");
-                  setError(null);
-                }}
-                className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-slate-400 hover:text-slate-100"
-              >
-                {openAi.cancel}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              disabled={!hasConnection || isDisconnecting || isConnecting}
+              className="rounded-lg border border-rose-500/40 px-3 py-2 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isDisconnecting ? openAi.disconnecting : openAi.disconnect}
+            </button>
           </div>
-        </form>
-      )}
+          <p className="text-xs text-slate-500">{openAi.loginDetails}</p>
+        </div>
+      </div>
     </section>
   );
 }

@@ -1,0 +1,45 @@
+{
+  "name": "desktop",
+  "version": "0.0.0",
+  "private": true,
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "cross-env CODEX_SKIP_EMBED=1 concurrently \"npm run dev --workspace server\" \"npm run dev --workspace web\" \"npm run start:dev\"",
+    "start:dev": "wait-on http://localhost:5173 http://localhost:8787 && cross-env NODE_ENV=development electron .",
+    "start": "cross-env NODE_ENV=production electron .",
+    "prepare:assets": "node scripts/prepare.js",
+    "build": "npm run build --workspace web && npm run build --workspace server && npm run prepare:assets",
+    "package": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.3",
+    "chokidar": "^3.6.0",
+    "cors": "^2.8.5",
+    "diff": "^7.0.0",
+    "express": "^4.21.2",
+    "openai": "^4.76.1",
+    "simple-git": "^3.27.0",
+    "uuid": "^9.0.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.0.5",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.codex.websitebuilder",
+    "productName": "Codex Website Builder",
+    "files": [
+      "main.js",
+      "dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "resources"
+    }
+  }
+}

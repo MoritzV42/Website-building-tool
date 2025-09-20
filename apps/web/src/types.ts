@@ -47,6 +47,10 @@ export interface ChangeLogEntry {
 }
 
 export interface OpenAiStatus {
-  configured: boolean;
+  connected: boolean;
+  method: "cli" | "apiKey" | null;
+  label: string | null;
   maskedKey: string | null;
+  profile: string | null;
+  updatedAt: number | null;
 }

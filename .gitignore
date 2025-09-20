@@ -2,6 +2,7 @@ node_modules/
 dist/
 apps/web/dist/
 apps/server/dist/
+apps/desktop/dist/
 .pnp.cjs
 .pnp.loader.mjs
 .env

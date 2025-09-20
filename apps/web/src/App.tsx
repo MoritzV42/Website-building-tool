@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { ChangeFeed } from "./components/ChangeFeed";
+import { DeployPanel } from "./components/DeployPanel";
 import { PreviewWorkspace } from "./components/PreviewWorkspace";
 import { TaskComposer } from "./components/TaskComposer";
 import { TopBar } from "./components/TopBar";
@@ -63,8 +64,9 @@ function App() {
         <div className="flex min-w-0 flex-1 flex-col">
           <PreviewWorkspace />
         </div>
-        <div className="w-full lg:w-96">
+        <div className="w-full lg:w-96 flex flex-col gap-4">
           <ChangeFeed />
+          <DeployPanel />
         </div>
       </main>
     </div>
