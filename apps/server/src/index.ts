@@ -220,6 +220,69 @@ function uniqueValues<T>(values: T[]): T[] {
   return result;
 }
 
+function isExecutableFile(target: string) {
+  if (!target) {
+    return false;
+  }
+  if (target.includes(".asar") && !target.includes(".asar.unpacked")) {
+    return false;
+  }
+  try {
+    const stats = fs.statSync(target);
+    if (stats.isFile() || stats.isSymbolicLink()) {
+      if (process.platform !== "win32") {
+        fs.accessSync(target, fs.constants.X_OK);
+      }
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function resolveExecutableFromPath(names: string[]) {
+  const normalizedNames = uniqueValues(names.map((name) => name.trim()).filter(Boolean));
+  if (!normalizedNames.length) {
+    return null;
+  }
+  const pathValue = process.env.PATH;
+  if (!pathValue) {
+    return null;
+  }
+  const directories = uniqueValues(pathValue.split(path.delimiter).filter(Boolean));
+  const suffixes =
+    process.platform === "win32"
+      ? uniqueValues([
+          "",
+          ...(process.env.PATHEXT?.split(";").filter(Boolean).map((ext) =>
+            ext.startsWith(".") ? ext : `.${ext}`
+          ) ?? [".COM", ".EXE", ".BAT", ".CMD"])
+        ])
+      : [""];
+
+  for (const directory of directories) {
+    for (const name of normalizedNames) {
+      const hasExtension = Boolean(path.extname(name));
+      if (hasExtension) {
+        const candidate = path.join(directory, name);
+        if (isExecutableFile(candidate)) {
+          return candidate;
+        }
+        continue;
+      }
+      for (const suffix of suffixes) {
+        const candidate = path.join(directory, `${name}${suffix}`);
+        if (isExecutableFile(candidate)) {
+          return candidate;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 function expandAsarAwareCandidates(target: string) {
   const candidates = [target];
   if (target.includes(".asar")) {
@@ -505,20 +568,33 @@ async function writeOpenAiKey(value: string | null) {
 }
 
 function resolveOpenAiCliPath() {
-  const overrides = process.env.CODEX_OPENAI_CLI ? [path.resolve(process.env.CODEX_OPENAI_CLI)] : [];
-  const candidates = [
-    ...overrides,
+  const override = process.env.CODEX_OPENAI_CLI?.trim();
+  const overrides = override ? [path.resolve(override)] : [];
+  const localCandidates = [
     path.join(SERVER_CWD, "node_modules", ".bin", OPENAI_CLI_BIN),
     path.join(path.resolve(SERVER_CWD, ".."), "node_modules", ".bin", OPENAI_CLI_BIN),
     path.join(path.resolve(SERVER_CWD, "..", ".."), "node_modules", ".bin", OPENAI_CLI_BIN)
   ];
-  for (const candidate of candidates) {
+
+  for (const candidate of uniqueValues([...overrides, ...localCandidates])) {
     for (const resolved of expandAsarAwareCandidates(candidate)) {
-      if (resolved && fs.existsSync(resolved)) {
+      if (isExecutableFile(resolved)) {
         return resolved;
       }
     }
   }
+
+  const fallback = resolveExecutableFromPath(
+    uniqueValues([
+      OPENAI_CLI_BIN,
+      "openai",
+      ...(process.platform === "win32" ? ["openai.exe", "openai.cmd", "openai.bat"] : [])
+    ])
+  );
+  if (fallback) {
+    return fallback;
+  }
+
   throw new Error(
     "OpenAI CLI wurde nicht gefunden. Installiere das npm-Paket 'openai' (lokal oder im Desktop-Workspace) oder setze CODEX_OPENAI_CLI auf den Pfad."
   );
@@ -606,7 +682,9 @@ async function loginWithOpenAiCli(profile: string) {
     const child = spawn(cliPath, args, {
       cwd: SERVER_CWD,
       env: { ...process.env, OPENAI_CLI_NO_COLOR: "1" },
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: process.platform === "win32",
+      shell: process.platform === "win32" && path.extname(cliPath).toLowerCase() === ".cmd"
     });
 
     let stdout = "";
@@ -690,7 +768,19 @@ async function loginWithOpenAiCli(profile: string) {
     };
 
     child.on("error", (error) => {
-      finalize(error as Error);
+      const err = error as NodeJS.ErrnoException;
+      console.warn(
+        `[openai-cli] Login-Aufruf konnte nicht gestartet werden (${err.code ?? "unknown"}): ${err.message}`
+      );
+      if (err.code === "EINVAL" || err.code === "ENOENT") {
+        finalize(
+          new Error(
+            "OpenAI-Login konnte nicht gestartet werden. Bitte installiere das npm-Paket 'openai' oder setze CODEX_OPENAI_CLI auf den Pfad zur OpenAI-CLI."
+          )
+        );
+        return;
+      }
+      finalize(err);
     });
 
     child.on("close", async (code) => {
