@@ -13,6 +13,8 @@ import { simpleGit } from "simple-git";
 import { WebSocketServer, WebSocket } from "ws";
 import { createTwoFilesPatch } from "diff";
 import { randomUUID } from "node:crypto";
+import { createCodexAdapterManager } from "./adapters/codex.js";
+import type { CodexRunTaskRequest, CodexStreamEvent, CodexTaskSession } from "./adapters/codex.js";
 
 const DEFAULT_PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
 const DEFAULT_ENV_PATH = process.env.CODEX_ENV_PATH
@@ -216,6 +218,69 @@ function uniqueValues<T>(values: T[]): T[] {
     }
   }
   return result;
+}
+
+function isExecutableFile(target: string) {
+  if (!target) {
+    return false;
+  }
+  if (target.includes(".asar") && !target.includes(".asar.unpacked")) {
+    return false;
+  }
+  try {
+    const stats = fs.statSync(target);
+    if (stats.isFile() || stats.isSymbolicLink()) {
+      if (process.platform !== "win32") {
+        fs.accessSync(target, fs.constants.X_OK);
+      }
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function resolveExecutableFromPath(names: string[]) {
+  const normalizedNames = uniqueValues(names.map((name) => name.trim()).filter(Boolean));
+  if (!normalizedNames.length) {
+    return null;
+  }
+  const pathValue = process.env.PATH;
+  if (!pathValue) {
+    return null;
+  }
+  const directories = uniqueValues(pathValue.split(path.delimiter).filter(Boolean));
+  const suffixes =
+    process.platform === "win32"
+      ? uniqueValues([
+          "",
+          ...(process.env.PATHEXT?.split(";").filter(Boolean).map((ext) =>
+            ext.startsWith(".") ? ext : `.${ext}`
+          ) ?? [".COM", ".EXE", ".BAT", ".CMD"])
+        ])
+      : [""];
+
+  for (const directory of directories) {
+    for (const name of normalizedNames) {
+      const hasExtension = Boolean(path.extname(name));
+      if (hasExtension) {
+        const candidate = path.join(directory, name);
+        if (isExecutableFile(candidate)) {
+          return candidate;
+        }
+        continue;
+      }
+      for (const suffix of suffixes) {
+        const candidate = path.join(directory, `${name}${suffix}`);
+        if (isExecutableFile(candidate)) {
+          return candidate;
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 function expandAsarAwareCandidates(target: string) {
@@ -503,20 +568,33 @@ async function writeOpenAiKey(value: string | null) {
 }
 
 function resolveOpenAiCliPath() {
-  const overrides = process.env.CODEX_OPENAI_CLI ? [path.resolve(process.env.CODEX_OPENAI_CLI)] : [];
-  const candidates = [
-    ...overrides,
+  const override = process.env.CODEX_OPENAI_CLI?.trim();
+  const overrides = override ? [path.resolve(override)] : [];
+  const localCandidates = [
     path.join(SERVER_CWD, "node_modules", ".bin", OPENAI_CLI_BIN),
     path.join(path.resolve(SERVER_CWD, ".."), "node_modules", ".bin", OPENAI_CLI_BIN),
     path.join(path.resolve(SERVER_CWD, "..", ".."), "node_modules", ".bin", OPENAI_CLI_BIN)
   ];
-  for (const candidate of candidates) {
+
+  for (const candidate of uniqueValues([...overrides, ...localCandidates])) {
     for (const resolved of expandAsarAwareCandidates(candidate)) {
-      if (resolved && fs.existsSync(resolved)) {
+      if (isExecutableFile(resolved)) {
         return resolved;
       }
     }
   }
+
+  const fallback = resolveExecutableFromPath(
+    uniqueValues([
+      OPENAI_CLI_BIN,
+      "openai",
+      ...(process.platform === "win32" ? ["openai.exe", "openai.cmd", "openai.bat"] : [])
+    ])
+  );
+  if (fallback) {
+    return fallback;
+  }
+
   throw new Error(
     "OpenAI CLI wurde nicht gefunden. Installiere das npm-Paket 'openai' (lokal oder im Desktop-Workspace) oder setze CODEX_OPENAI_CLI auf den Pfad."
   );
@@ -604,7 +682,9 @@ async function loginWithOpenAiCli(profile: string) {
     const child = spawn(cliPath, args, {
       cwd: SERVER_CWD,
       env: { ...process.env, OPENAI_CLI_NO_COLOR: "1" },
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: process.platform === "win32",
+      shell: process.platform === "win32" && path.extname(cliPath).toLowerCase() === ".cmd"
     });
 
     let stdout = "";
@@ -688,7 +768,19 @@ async function loginWithOpenAiCli(profile: string) {
     };
 
     child.on("error", (error) => {
-      finalize(error as Error);
+      const err = error as NodeJS.ErrnoException;
+      console.warn(
+        `[openai-cli] Login-Aufruf konnte nicht gestartet werden (${err.code ?? "unknown"}): ${err.message}`
+      );
+      if (err.code === "EINVAL" || err.code === "ENOENT") {
+        finalize(
+          new Error(
+            "OpenAI-Login konnte nicht gestartet werden. Bitte installiere das npm-Paket 'openai' oder setze CODEX_OPENAI_CLI auf den Pfad zur OpenAI-CLI."
+          )
+        );
+        return;
+      }
+      finalize(err);
     });
 
     child.on("close", async (code) => {
@@ -720,6 +812,27 @@ const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 const clients = new Set<WebSocket>();
 const workspace = new WorkspaceManager(SERVER_CWD, DEFAULT_SHADOW_PATH);
+type ActiveCodexAdapter = Awaited<ReturnType<typeof createCodexAdapterManager>>;
+let codexAdapterPromise: Promise<ActiveCodexAdapter> | null = null;
+
+function resetCodexAdapter() {
+  codexAdapterPromise = null;
+}
+
+async function ensureCodexAdapter(force = false) {
+  if (force) {
+    resetCodexAdapter();
+  }
+  if (!codexAdapterPromise) {
+    codexAdapterPromise = createCodexAdapterManager({
+      workspaceRoot: workspace.getRepositoryPath(),
+      configPath: path.join(workspace.getRepositoryPath(), ".codexrc.json"),
+      env: process.env,
+      logger: console
+    });
+  }
+  return codexAdapterPromise;
+}
 const tasks: Task[] = [];
 const patchRecords = new Map<string, PatchRecord>();
 
@@ -748,6 +861,9 @@ app.post("/api/repository", async (req, res) => {
   try {
     const resolved = await workspace.setRepositoryPath(repoPath);
     broadcast({ type: "workspace:ready", repository: resolved });
+    void ensureCodexAdapter(true).catch((error) => {
+      console.warn(`[codex] Adapter konnte nicht neu initialisiert werden: ${(error as Error).message}`);
+    });
     res.json({ repository: resolved });
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
@@ -874,6 +990,126 @@ app.post("/api/tasks", async (req, res) => {
     broadcast({ type: "task:updated", task });
   });
   res.json(task);
+});
+
+app.post("/codex/task", async (req, res) => {
+  const isRpc = typeof req.body?.method === "string";
+  if (isRpc && req.body.method !== "codex.runTask") {
+    res.status(400).json({ error: `Unsupported method ${req.body.method}` });
+    return;
+  }
+  const params = isRpc ? req.body.params : req.body;
+  if (!params || typeof params.selector !== "string" || typeof params.goal !== "string") {
+    res.status(400).json({ error: "selector and goal are required" });
+    return;
+  }
+
+  let adapter: ActiveCodexAdapter;
+  try {
+    adapter = await ensureCodexAdapter();
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+    return;
+  }
+
+  res.status(200);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  if (typeof (res as unknown as { flushHeaders?: () => void }).flushHeaders === "function") {
+    (res as unknown as { flushHeaders: () => void }).flushHeaders();
+  }
+
+  const request: CodexRunTaskRequest = {
+    selector: params.selector,
+    goal: params.goal,
+    context: typeof params.context === "object" && params.context
+      ? (params.context as CodexRunTaskRequest["context"])
+      : undefined
+  };
+
+  let session: CodexTaskSession;
+  try {
+    session = await adapter.runTask(request);
+  } catch (error) {
+    const message = (error as Error).message || "Codex task konnte nicht gestartet werden.";
+    res.write(`${JSON.stringify({ event: "error", message })}\n`);
+    res.end();
+    return;
+  }
+
+  const writeEvent = (event: CodexStreamEvent) => {
+    res.write(`${JSON.stringify(event)}\n`);
+  };
+
+  let unsubscribe: (() => void) | null = null;
+  try {
+    unsubscribe = adapter.streamEvents(session.id, writeEvent);
+  } catch (error) {
+    const message = (error as Error).message || "Streaming konnte nicht initialisiert werden.";
+    res.write(`${JSON.stringify({ event: "error", message })}\n`);
+    res.end();
+    session.dispose();
+    return;
+  }
+
+  let finished = false;
+  let closeOff = () => {};
+  let errorOff = () => {};
+  const finish = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
+    closeOff();
+    errorOff();
+    res.end();
+  };
+
+  closeOff = session.onClose(() => {
+    finish();
+  });
+  errorOff = session.onError((error: Error) => {
+    writeEvent({ event: "error", message: error.message });
+  });
+
+  req.on("close", () => {
+    session.dispose();
+    finish();
+  });
+});
+
+app.post("/codex/approve", async (req, res) => {
+  const isRpc = typeof req.body?.method === "string";
+  if (isRpc && req.body.method !== "codex.approve") {
+    res.status(400).json({ error: `Unsupported method ${req.body.method}` });
+    return;
+  }
+  const params = isRpc ? req.body.params : req.body;
+  const batchId = typeof params?.batchId === "string" ? params.batchId : undefined;
+  if (!batchId) {
+    res.status(400).json({ error: "batchId is required" });
+    return;
+  }
+  const approveParam =
+    typeof params?.approve === "boolean"
+      ? params.approve
+      : typeof params?.decision === "string"
+        ? params.decision === "approve"
+        : undefined;
+  const approve = approveParam ?? true;
+
+  try {
+    const adapter = await ensureCodexAdapter();
+    await adapter.requestApproval(batchId, approve);
+    res.json({ batchId, status: approve ? "approved" : "rejected" });
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
 });
 
 wss.on("connection", (socket) => {
