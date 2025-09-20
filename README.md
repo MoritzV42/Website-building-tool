@@ -58,11 +58,11 @@ git clone https://github.com/<you>/codex-site-editor.git
 cd codex-site-editor
 
 # 2) Setup
-pnpm i   # oder npm/yarn
+npm install   # installiert Root + Workspaces
 cp .env.example .env   # GITHUB_TOKEN optional
 
 # 3) Dev-Server
-pnpm dev
+npm run dev
 # UI: http://localhost:5173  (Backend auf 8787)
 ```
 
@@ -182,29 +182,25 @@ GITHUB_DEFAULT_BASE=main
 
 ## Entwicklung
 
-**Monorepo Struktur (Vorschlag)**
+**Monorepo Struktur**
 
 ```
-/ apps
-  /web   (React UI)
-  /srv   (Node backend)
-/ packages
-  /adapters/codex-runner
-  /adapters/git
-  /adapters/diff
-  /ui/selector-overlay
+/apps
+  /server   (Express + WS Backend für JSON-RPC, Repo- und Git-Adapter)
+  /web      (Vite + React UI inkl. Element-Picker & Diff-Panel)
+/package.json (Workspaces & gemeinsame Scripts)
+/.codexrc.json (Apply-Policy & Preview-Defaults)
 ```
 
-**Scripts**
+**NPM Scripts (Root)**
 
-```json
-{
-  "dev": "turbo run dev --parallel",
-  "build": "turbo run build",
-  "lint": "eslint .",
-  "format": "prettier -w ."
-}
-```
+| Command | Beschreibung |
+| --- | --- |
+| `npm run dev` | startet UI (`apps/web`) & Backend (`apps/server`) parallel |
+| `npm run dev:web` | nur die Vite UI (Port 5173) |
+| `npm run dev:server` | nur den Node/WS Backend-Server (Port 8787) |
+| `npm run build` | UI bundlen + Server transpilieren |
+| `npm run lint` | ESLint über Workspaces |
 
 ---
 
