@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "cross-env CODEX_SKIP_EMBED=1 concurrently \"npm run dev --workspace server\" \"npm run dev --workspace web\" \"npm run start:dev\"",
-    "start:dev": "wait-on http://localhost:5173 http://localhost:8787 && cross-env NODE_ENV=development electron .",
+    "start:dev": "wait-on http-get://localhost:5173 http-get://localhost:8787/api/health && cross-env NODE_ENV=development electron .",
     "start": "cross-env NODE_ENV=production electron .",
     "prepare:assets": "node scripts/prepare.js",
     "build": "npm run build --workspace web && npm run build --workspace server && npm run prepare:assets",

@@ -163,29 +163,110 @@ interface CommandOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-async function runCommand(command: string, args: string[], options: CommandOptions = {}) {
-  return await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
-    const child = spawn(command, args, {
-      windowsHide: true,
-      cwd: options.cwd,
-      env: options.env
-    });
-    let stdout = "";
-    let stderr = "";
+function uniqueValues<T>(values: T[]): T[] {
+  const result: T[] = [];
+  const seen = new Set<T>();
+  for (const value of values) {
+    if (!seen.has(value)) {
+      seen.add(value);
+      result.push(value);
+    }
+  }
+  return result;
+}
 
-    child.stdout?.on("data", (data) => {
-      stdout += data.toString();
-    });
-    child.stderr?.on("data", (data) => {
-      stderr += data.toString();
-    });
-    child.on("error", (error) => {
-      reject(error);
-    });
-    child.on("close", (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
-    });
+function expandAsarAwareCandidates(target: string) {
+  const candidates = [target];
+  if (target.includes(".asar")) {
+    const parts = target.split(path.sep);
+    const index = parts.findIndex((segment) => segment.endsWith(".asar"));
+    if (index !== -1) {
+      const unpackedParts = [...parts];
+      unpackedParts[index] = `${parts[index]}.unpacked`;
+      candidates.unshift(path.join(...unpackedParts));
+    }
+  }
+  return uniqueValues(candidates);
+}
+
+async function runCommand(command: string, args: string[], options: CommandOptions = {}) {
+  const env = options.env ?? process.env;
+  const commandCandidates = expandAsarAwareCandidates(command);
+  const rawCwdCandidates: Array<string | undefined> = [
+    ...(options.cwd ? expandAsarAwareCandidates(options.cwd) : []),
+    undefined,
+    process.cwd(),
+    path.dirname(process.execPath),
+    os.homedir()
+  ];
+  const cwdCandidates = uniqueValues(rawCwdCandidates).filter((candidate) => {
+    if (candidate === undefined) {
+      return true;
+    }
+    try {
+      return fs.existsSync(candidate);
+    } catch {
+      return false;
+    }
   });
+
+  const spawnOnce = (cmd: string, cwd: string | undefined) =>
+    new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
+      const child = spawn(cmd, args, {
+        windowsHide: process.platform === "win32",
+        cwd,
+        env
+      });
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
+      child.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
+      child.on("error", (error) => {
+        reject(error);
+      });
+      child.on("close", (code) => {
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
+      });
+    });
+
+  let lastSpawnError: NodeJS.ErrnoException | null = null;
+
+  for (const candidateCommand of commandCandidates) {
+    for (const candidateCwd of cwdCandidates) {
+      try {
+        return await spawnOnce(candidateCommand, candidateCwd);
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code === "EINVAL") {
+          lastSpawnError = err;
+          continue;
+        }
+        if (err.code === "ENOENT") {
+          lastSpawnError = err;
+          break;
+        }
+        throw error;
+      }
+    }
+  }
+
+  if (lastSpawnError) {
+    if (lastSpawnError.code === "EINVAL") {
+      const detailedError = new Error(
+        "OpenAI-Login konnte nicht gestartet werden. Bitte stelle sicher, dass die OpenAI-CLI installiert ist und Codex auf das Benutzerverzeichnis zugreifen kann."
+      );
+      (detailedError as NodeJS.ErrnoException).code = lastSpawnError.code;
+      throw detailedError;
+    }
+    throw lastSpawnError;
+  }
+
+  throw new Error(`Fehler beim Starten von ${path.basename(command)}.`);
 }
 
 async function openDirectoryPicker(): Promise<string | null> {
@@ -387,8 +468,10 @@ function resolveOpenAiCliPath() {
     path.join(path.resolve(SERVER_CWD, "..", ".."), "node_modules", ".bin", OPENAI_CLI_BIN)
   ];
   for (const candidate of candidates) {
-    if (candidate && fs.existsSync(candidate)) {
-      return candidate;
+    for (const resolved of expandAsarAwareCandidates(candidate)) {
+      if (resolved && fs.existsSync(resolved)) {
+        return resolved;
+      }
     }
   }
   throw new Error(
