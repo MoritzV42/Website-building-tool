@@ -1,4 +1,4 @@
-import type { TaskStatus } from "../types";
+import type { PatchStatus, TaskStatus } from "../types";
 
 export type Language = "en" | "de";
 
@@ -90,6 +90,15 @@ interface Translation {
     emptyPatches: string;
     emptyLogs: string;
     logLevelLabel: Record<"info" | "warning" | "error", string>;
+    statusLabel: Record<PatchStatus, string>;
+    actions: {
+      apply: string;
+      reapply: string;
+      reject: string;
+      revert: string;
+      working: string;
+    };
+    actionError: string;
   };
   tutorial: TutorialCopy;
   openAi: {
@@ -184,7 +193,21 @@ export const translations: Record<Language, Translation> = {
         info: "Info",
         warning: "Warning",
         error: "Error"
-      }
+      },
+      statusLabel: {
+        pending: "Pending",
+        applied: "Applied",
+        discarded: "Discarded",
+        reverted: "Reverted"
+      },
+      actions: {
+        apply: "Apply patch",
+        reapply: "Apply again",
+        reject: "Reject",
+        revert: "Revert",
+        working: "Working…"
+      },
+      actionError: "Failed to update patch"
     },
     tutorial: {
       card: {
@@ -372,7 +395,21 @@ export const translations: Record<Language, Translation> = {
         info: "Info",
         warning: "Warnung",
         error: "Fehler"
-      }
+      },
+      statusLabel: {
+        pending: "Offen",
+        applied: "Übernommen",
+        discarded: "Verworfen",
+        reverted: "Zurückgesetzt"
+      },
+      actions: {
+        apply: "Patch übernehmen",
+        reapply: "Erneut übernehmen",
+        reject: "Ablehnen",
+        revert: "Rückgängig machen",
+        working: "Arbeite…"
+      },
+      actionError: "Patch-Aktion fehlgeschlagen"
     },
     tutorial: {
       card: {

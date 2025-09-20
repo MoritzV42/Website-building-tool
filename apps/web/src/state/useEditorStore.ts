@@ -35,7 +35,8 @@ interface EditorState {
   setGitStatus(status: GitStatusSummary | null): void;
   upsertTask(task: Task): void;
   resetTasks(tasks: Task[]): void;
-  pushPatch(patch: PatchEvent): void;
+  setPatches(patches: PatchEvent[]): void;
+  upsertPatch(patch: PatchEvent): void;
   appendLog(entry: Omit<ChangeLogEntry, "id" | "createdAt"> & { id?: string; createdAt?: number }): void;
   setSelectedTask(id: string | null): void;
   setSelectedSelector(selector: string | null): void;
@@ -95,8 +96,18 @@ export const useEditorStore = create<EditorState>((set) => ({
       };
     }),
   resetTasks: (tasks) => set({ tasks }),
-  pushPatch: (patch) =>
-    set((state) => ({ patches: [patch, ...state.patches].slice(0, 25) })),
+  setPatches: (patches) =>
+    set(() => ({ patches: [...patches].sort((a, b) => b.createdAt - a.createdAt).slice(0, 50) })),
+  upsertPatch: (patch) =>
+    set((state) => {
+      const existingIndex = state.patches.findIndex((item) => item.id === patch.id);
+      if (existingIndex === -1) {
+        return { patches: [patch, ...state.patches].slice(0, 50) };
+      }
+      const next = [...state.patches];
+      next[existingIndex] = { ...next[existingIndex], ...patch };
+      return { patches: next };
+    }),
   appendLog: ({ id, createdAt, ...rest }) =>
     set((state) => ({
       logs: [
