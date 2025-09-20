@@ -6,8 +6,7 @@ This helper script automates the setup steps described in the README:
 * installs npm dependencies (workspace aware)
 * ensures a .env file exists based on .env.example
 * creates/refreshes a Windows shortcut with the Codex launcher icon
-* launches the combined dev server (UI + backend)
-* opens the web interface in the default browser
+* startet die Desktop-App (Electron-Shell inkl. Backend)
 
 Run it with ``python StartWebsiteBuilder.py`` and stop it via ``Ctrl+C``
 when you are done working with the Website Builder.
@@ -19,8 +18,6 @@ import base64
 import shutil
 import subprocess
 import sys
-import time
-import webbrowser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -152,11 +149,11 @@ def ensure_windows_shortcut(python_path: str) -> None:
         print("⚠️  Konnte Verknüpfung nicht erstellen:", error)
 
 
-def launch_dev_server(npm_path: str) -> None:
-    """Start the dev server and keep streaming its logs until interruption."""
-    print("\n🚀 Starte Entwicklungsserver (Strg+C zum Beenden)...\n")
+def launch_desktop_app(npm_path: str) -> None:
+    """Start the desktop shell and stream its output until interruption."""
+    print("\n🚀 Starte Desktop-App (Strg+C zum Beenden)...\n")
     process = subprocess.Popen(
-        [npm_path, "run", "dev"],
+        [npm_path, "run", "dev:desktop"],
         cwd=ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -164,25 +161,21 @@ def launch_dev_server(npm_path: str) -> None:
     )
     assert process.stdout is not None
 
-    # Gebe dem Server einen Moment zum Starten, bevor der Browser geöffnet wird.
-    time.sleep(3)
-    webbrowser.open("http://localhost:5173", new=2, autoraise=True)
-
     try:
         for line in process.stdout:
             print(line, end="")
     except KeyboardInterrupt:
-        print("\n🛑 Stoppe Entwicklungsserver...")
+        print("\n🛑 Stoppe Desktop-App...")
         process.terminate()
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
-        print("✅ Entwicklungsserver beendet.")
+        print("✅ Desktop-App beendet.")
         return
 
     if process.wait() != 0:
-        print("\n❌ Entwicklungsserver hat einen Fehler gemeldet.")
+        print("\n❌ Desktop-App hat einen Fehler gemeldet.")
         sys.exit(1)
 
 
@@ -197,7 +190,7 @@ def main() -> None:
 
     ensure_windows_shortcut(sys.executable)
 
-    launch_dev_server(npm_path)
+    launch_desktop_app(npm_path)
 
 
 if __name__ == "__main__":

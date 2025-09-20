@@ -1,19 +1,35 @@
 import bodyParser from "body-parser";
 import chokidar, { FSWatcher } from "chokidar";
 import cors from "cors";
-import { createServer } from "http";
+import { createServer, Server } from "http";
 import path from "node:path";
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import { spawn } from "node:child_process";
+import os from "node:os";
+import { pathToFileURL } from "node:url";
 import express from "express";
 import { simpleGit } from "simple-git";
 import { WebSocketServer, WebSocket } from "ws";
 import { createTwoFilesPatch } from "diff";
 import { randomUUID } from "node:crypto";
 
-const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
-const ENV_PATH = path.resolve(process.cwd(), "..", "..", ".env");
+const DEFAULT_PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
+const DEFAULT_ENV_PATH = process.env.CODEX_ENV_PATH
+  ? path.resolve(process.env.CODEX_ENV_PATH)
+  : path.resolve(process.cwd(), "..", "..", ".env");
+const DEFAULT_METADATA_PATH = process.env.CODEX_OPENAI_METADATA
+  ? path.resolve(process.env.CODEX_OPENAI_METADATA)
+  : path.join(path.dirname(DEFAULT_ENV_PATH), "openai-status.json");
+const DEFAULT_SHADOW_PATH = process.env.CODEX_SHADOW_PATH
+  ? path.resolve(process.env.CODEX_SHADOW_PATH)
+  : path.join(process.cwd(), ".codex-shadow");
+
+const SERVER_CWD = process.env.CODEX_SERVER_CWD ? path.resolve(process.env.CODEX_SERVER_CWD) : process.cwd();
+const OPENAI_CLI_BIN = process.platform === "win32" ? "openai.cmd" : "openai";
+
+let currentEnvPath = DEFAULT_ENV_PATH;
+let currentMetadataPath = DEFAULT_METADATA_PATH;
 
 interface TaskRequest {
   selector: string;
@@ -54,9 +70,9 @@ class WorkspaceManager {
   private watcher?: FSWatcher;
   private readonly watcherHandlers: Array<(event: ServerEvent) => void> = [];
 
-  constructor(initialPath: string) {
+  constructor(initialPath: string, shadowRoot: string = DEFAULT_SHADOW_PATH) {
     this.repoPath = initialPath;
-    this.shadowPath = path.join(process.cwd(), ".codex-shadow");
+    this.shadowPath = path.resolve(shadowRoot);
     fs.mkdirSync(this.shadowPath, { recursive: true });
   }
 
@@ -142,9 +158,18 @@ class WorkspaceManager {
   }
 }
 
-async function runCommand(command: string, args: string[]) {
+interface CommandOptions {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+async function runCommand(command: string, args: string[], options: CommandOptions = {}) {
   return await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true });
+    const child = spawn(command, args, {
+      windowsHide: true,
+      cwd: options.cwd,
+      env: options.env
+    });
     let stdout = "";
     let stderr = "";
 
@@ -245,19 +270,66 @@ async function openDirectoryPicker(): Promise<string | null> {
   throw new Error(`Directory picker is not supported on ${platform}`);
 }
 
-function formatOpenAiStatus(apiKey: string | null) {
+interface OpenAiMetadata {
+  method: "cli" | "apiKey";
+  profile?: string;
+  updatedAt: number;
+}
+
+function formatOpenAiStatus(apiKey: string | null, metadata: OpenAiMetadata | null) {
   if (!apiKey) {
-    return { configured: false, maskedKey: null };
+    return { connected: false, method: null, label: null, maskedKey: null, profile: null, updatedAt: null };
   }
   const trimmed = apiKey.trim();
   const visible = trimmed.slice(-4);
   const masked = `${"•".repeat(Math.max(trimmed.length - 4, 0))}${visible}`;
-  return { configured: true, maskedKey: masked };
+  const method = metadata?.method ?? "apiKey";
+  const label = method === "cli" ? `GPT Login${metadata?.profile ? ` (${metadata.profile})` : ""}` : "Manual key";
+  return {
+    connected: true,
+    method,
+    label,
+    maskedKey: masked,
+    profile: metadata?.profile ?? null,
+    updatedAt: metadata?.updatedAt ?? null
+  };
+}
+
+async function readOpenAiMetadata(): Promise<OpenAiMetadata | null> {
+  try {
+    const content = await fsp.readFile(currentMetadataPath, "utf8");
+    return JSON.parse(content) as OpenAiMetadata;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function writeOpenAiMetadata(value: OpenAiMetadata | null) {
+  try {
+    if (!value) {
+      await fsp.unlink(currentMetadataPath);
+      return;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  if (!value) {
+    return;
+  }
+
+  await fsp.mkdir(path.dirname(currentMetadataPath), { recursive: true });
+  await fsp.writeFile(currentMetadataPath, JSON.stringify(value, null, 2), "utf8");
 }
 
 async function readOpenAiKey(): Promise<string | null> {
   try {
-    const content = await fsp.readFile(ENV_PATH, "utf8");
+    const content = await fsp.readFile(currentEnvPath, "utf8");
     const line = content
       .split(/\r?\n/)
       .find((entry) => entry.trim().startsWith("OPENAI_API_KEY="));
@@ -277,7 +349,7 @@ async function writeOpenAiKey(value: string | null) {
   const normalized = value ?? "";
   let content = "";
   try {
-    content = await fsp.readFile(ENV_PATH, "utf8");
+    content = await fsp.readFile(currentEnvPath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
@@ -302,14 +374,124 @@ async function writeOpenAiKey(value: string | null) {
     }
   }
 
-  await fsp.writeFile(ENV_PATH, content, "utf8");
+  await fsp.mkdir(path.dirname(currentEnvPath), { recursive: true });
+  await fsp.writeFile(currentEnvPath, content, "utf8");
+}
+
+function resolveOpenAiCliPath() {
+  const overrides = process.env.CODEX_OPENAI_CLI ? [path.resolve(process.env.CODEX_OPENAI_CLI)] : [];
+  const candidates = [
+    ...overrides,
+    path.join(SERVER_CWD, "node_modules", ".bin", OPENAI_CLI_BIN),
+    path.join(path.resolve(SERVER_CWD, ".."), "node_modules", ".bin", OPENAI_CLI_BIN),
+    path.join(path.resolve(SERVER_CWD, "..", ".."), "node_modules", ".bin", OPENAI_CLI_BIN)
+  ];
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(
+    "OpenAI CLI wurde nicht gefunden. Installiere das npm-Paket 'openai' (lokal oder im Desktop-Workspace) oder setze CODEX_OPENAI_CLI auf den Pfad."
+  );
+}
+
+function extractCliApiKey(config: string, profile: string) {
+  const lines = config.split(/\r?\n/);
+  let inSection = false;
+  let sectionIndent = 0;
+  for (const line of lines) {
+    if (!inSection) {
+      const match = line.match(/^(\s*)([\w-]+):\s*$/);
+      if (match && match[2] === profile) {
+        inSection = true;
+        sectionIndent = match[1].length;
+      }
+      continue;
+    }
+
+    const indent = (line.match(/^(\s*)/)?.[1].length ?? 0);
+    if (indent <= sectionIndent && line.trim()) {
+      const match = line.match(/^(\s*)([\w-]+):\s*$/);
+      if (match && match[2] === profile) {
+        sectionIndent = match[1].length;
+        continue;
+      }
+      inSection = false;
+      if (!match) {
+        continue;
+      }
+    }
+
+    if (!inSection) {
+      continue;
+    }
+
+    const trimmed = line.trim();
+    if (trimmed.startsWith("api_key:")) {
+      const rawValue = trimmed.slice("api_key:".length).trim();
+      return rawValue.replace(/^['"]|['"]$/g, "");
+    }
+  }
+  return null;
+}
+
+async function readOpenAiCliKey(profile: string) {
+  const overrides = process.env.CODEX_OPENAI_CONFIG ? [path.resolve(process.env.CODEX_OPENAI_CONFIG)] : [];
+  const roaming = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
+  const candidates = [
+    ...overrides,
+    path.join(os.homedir(), ".config", "openai", "config.yaml"),
+    path.join(os.homedir(), "Library", "Application Support", "openai", "config.yaml"),
+    path.join(roaming, "openai", "config.yaml")
+  ];
+
+  const visited = new Set<string>();
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (visited.has(resolved)) {
+      continue;
+    }
+    visited.add(resolved);
+    try {
+      const content = await fsp.readFile(resolved, "utf8");
+      const key = extractCliApiKey(content, profile);
+      if (key) {
+        return key;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+  return null;
+}
+
+async function loginWithOpenAiCli(profile: string) {
+  const cliPath = resolveOpenAiCliPath();
+  const args = ["login"];
+  if (profile && profile !== "default") {
+    args.push("--profile", profile);
+  }
+  const { exitCode, stderr, stdout } = await runCommand(cliPath, args, { cwd: SERVER_CWD, env: process.env });
+  if (exitCode !== 0) {
+    throw new Error(stderr || stdout || "OpenAI-Login fehlgeschlagen.");
+  }
+  const key = await readOpenAiCliKey(profile);
+  if (!key) {
+    throw new Error(
+      "Die Anmeldung wurde abgeschlossen, aber es wurde kein API-Schlüssel gefunden. Bitte versuche es erneut oder lege den Schlüssel manuell fest."
+    );
+  }
+  return key;
 }
 
 const app = express();
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 const clients = new Set<WebSocket>();
-const workspace = new WorkspaceManager(process.cwd());
+const workspace = new WorkspaceManager(SERVER_CWD, DEFAULT_SHADOW_PATH);
 const tasks: Task[] = [];
 
 app.use(cors());
@@ -361,8 +543,8 @@ app.get("/api/tasks", (_req, res) => {
 
 app.get("/api/settings/openai", async (_req, res) => {
   try {
-    const apiKey = await readOpenAiKey();
-    res.json(formatOpenAiStatus(apiKey));
+    const [apiKey, metadata] = await Promise.all([readOpenAiKey(), readOpenAiMetadata()]);
+    res.json(formatOpenAiStatus(apiKey, metadata));
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -372,8 +554,36 @@ app.post("/api/settings/openai", async (req, res) => {
   const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
   try {
     await writeOpenAiKey(apiKey || null);
-    const status = await readOpenAiKey();
-    res.json(formatOpenAiStatus(status));
+    if (apiKey) {
+      await writeOpenAiMetadata({ method: "apiKey", updatedAt: Date.now() });
+    } else {
+      await writeOpenAiMetadata(null);
+    }
+    const [storedKey, metadata] = await Promise.all([readOpenAiKey(), readOpenAiMetadata()]);
+    res.json(formatOpenAiStatus(storedKey, metadata));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+app.delete("/api/settings/openai", async (_req, res) => {
+  try {
+    await writeOpenAiKey(null);
+    await writeOpenAiMetadata(null);
+    res.json(formatOpenAiStatus(null, null));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+app.post("/api/settings/openai/login", async (req, res) => {
+  const profile = typeof req.body?.profile === "string" && req.body.profile.trim() ? req.body.profile.trim() : "default";
+  try {
+    const apiKey = await loginWithOpenAiCli(profile);
+    await writeOpenAiKey(apiKey);
+    await writeOpenAiMetadata({ method: "cli", profile, updatedAt: Date.now() });
+    const [storedKey, metadata] = await Promise.all([readOpenAiKey(), readOpenAiMetadata()]);
+    res.json(formatOpenAiStatus(storedKey, metadata));
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -456,6 +666,70 @@ function synthesizeChange(source: string, task: Task) {
   return `${banner}${source}`;
 }
 
-httpServer.listen(PORT, () => {
-  console.log(`Codex backend listening on http://localhost:${PORT}`);
-});
+let activeServer: Server | null = null;
+
+interface StartServerOptions {
+  port?: number;
+  envPath?: string;
+  metadataPath?: string;
+}
+
+interface CodexServerHandle {
+  port: number;
+  close(): Promise<void>;
+}
+
+export async function startCodexServer(options: StartServerOptions = {}): Promise<CodexServerHandle> {
+  const targetPort = options.port ?? DEFAULT_PORT;
+  if (options.envPath) {
+    currentEnvPath = path.resolve(options.envPath);
+    if (!options.metadataPath) {
+      currentMetadataPath = path.join(path.dirname(currentEnvPath), "openai-status.json");
+    }
+  }
+  if (options.metadataPath) {
+    currentMetadataPath = path.resolve(options.metadataPath);
+  }
+  if (activeServer) {
+    throw new Error("Codex-Server läuft bereits");
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    activeServer = httpServer.listen(targetPort, () => {
+      console.log(`Codex backend listening on http://localhost:${targetPort}`);
+      resolve();
+    });
+    activeServer.on("error", (error) => {
+      activeServer?.close();
+      activeServer = null;
+      reject(error);
+    });
+  });
+
+  return {
+    port: targetPort,
+    close: () =>
+      new Promise<void>((resolveClose, rejectClose) => {
+        if (!activeServer) {
+          resolveClose();
+          return;
+        }
+        activeServer.close((error) => {
+          if (error) {
+            rejectClose(error);
+            return;
+          }
+          activeServer = null;
+          resolveClose();
+        });
+      })
+  };
+}
+
+const executedScript = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+if (executedScript === import.meta.url) {
+  startCodexServer().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
