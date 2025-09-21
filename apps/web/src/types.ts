@@ -59,5 +59,6 @@ export interface OpenAiStatus {
   label: string | null;
   maskedKey: string | null;
   profile: string | null;
+  cliVariant: "openai" | "codex" | null;
   updatedAt: number | null;
 }

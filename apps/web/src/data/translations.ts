@@ -124,7 +124,7 @@ interface Translation {
     statusMasked: (masked: string) => string;
     statusManual: (masked: string) => string;
     statusMissing: string;
-    cliProfile: (profile: string) => string;
+    cliProfile: (variant: "openai" | "codex", profile: string) => string;
   };
   deployPanel: {
     title: string;
@@ -310,7 +310,7 @@ export const translations: Record<Language, Translation> = {
     openAi: {
       title: "Connect Codex to GPT",
       description:
-        "Sign in once with the OpenAI CLI. Codex stores the token locally and reuses it for your coding sessions.",
+        "Sign in once with the OpenAI or Codex CLI. Codex stores the token locally and reuses it for your coding sessions.",
       helper: "The login command runs locally; no credentials ever leave your machine.",
       docsLabel: "Open CLI guide",
       login: "Sign in with GPT",
@@ -319,7 +319,8 @@ export const translations: Record<Language, Translation> = {
       disconnect: "Disconnect",
       disconnecting: "Disconnecting…",
       loginHint: "A browser window opens with the official OpenAI login flow.",
-      loginDetails: "After finishing the flow the CLI stores a short-lived API key in ~/.config/openai/config.yaml.",
+      loginDetails:
+        "The OpenAI CLI stores the key in ~/.config/openai/config.yaml, the Codex CLI writes credentials to ~/.codex/auth.json.",
       manualLabel: "Paste an API key manually",
       manualHint: "Create or reuse an API key on platform.openai.com and paste it here if the CLI login is unavailable.",
       manualPlaceholder: "sk-...",
@@ -331,7 +332,8 @@ export const translations: Record<Language, Translation> = {
       statusMasked: (masked: string) => `Token ${masked}`,
       statusManual: (masked: string) => `Manual key ${masked}`,
       statusMissing: "Not connected yet",
-      cliProfile: (profile: string) => `Linked via OpenAI CLI profile “${profile}”`
+      cliProfile: (variant, profile) =>
+        variant === "codex" ? "Signed in via Codex CLI credentials" : `Linked via OpenAI CLI profile “${profile}”`
     },
     deployPanel: {
       title: "Deploy",
@@ -518,7 +520,8 @@ export const translations: Record<Language, Translation> = {
     },
     openAi: {
       title: "Codex mit GPT verbinden",
-      description: "Melde dich einmal über die OpenAI-CLI an. Codex speichert den Token lokal und nutzt ihn für deine Sessions.",
+      description:
+        "Melde dich einmal über die OpenAI- oder Codex-CLI an. Codex speichert den Token lokal und nutzt ihn für deine Sessions.",
       helper: "Der Login läuft komplett lokal – der Token bleibt auf deinem Rechner.",
       docsLabel: "CLI-Anleitung öffnen",
       login: "Mit GPT anmelden",
@@ -527,7 +530,8 @@ export const translations: Record<Language, Translation> = {
       disconnect: "Verbindung trennen",
       disconnecting: "Trenne…",
       loginHint: "Wir öffnen das offizielle OpenAI-Login im Browser.",
-      loginDetails: "Nach Abschluss legt die CLI den Schlüssel unter ~/.config/openai/config.yaml ab.",
+      loginDetails:
+        "Die OpenAI-CLI legt den Schlüssel unter ~/.config/openai/config.yaml ab, die Codex-CLI speichert ihn in ~/.codex/auth.json.",
       manualLabel: "API-Schlüssel direkt eintragen",
       manualHint: "Falls der CLI-Login nicht klappt: Erzeuge auf platform.openai.com einen API-Schlüssel und füge ihn hier ein.",
       manualPlaceholder: "sk-...",
@@ -539,7 +543,10 @@ export const translations: Record<Language, Translation> = {
       statusMasked: (masked: string) => `Token ${masked}`,
       statusManual: (masked: string) => `Eigener Schlüssel ${masked}`,
       statusMissing: "Noch nicht verbunden",
-      cliProfile: (profile: string) => `Gekoppelt über CLI-Profil „${profile}“`
+      cliProfile: (variant, profile) =>
+        variant === "codex"
+          ? "Angemeldet über die Codex-CLI-Anmeldedaten"
+          : `Gekoppelt über OpenAI-CLI-Profil „${profile}“`
     },
     deployPanel: {
       title: "Deploy",

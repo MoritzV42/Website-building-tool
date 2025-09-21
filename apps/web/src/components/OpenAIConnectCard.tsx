@@ -15,7 +15,7 @@ export function OpenAIConnectCard() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const docsUrl = "https://platform.openai.com/docs/guides/openai-cli";
+  const docsUrl = "https://github.com/openai/codex#readme";
   const hasConnection = openAiStatus.connected;
 
   const formatStatusMessage = (status = openAiStatus) => {
@@ -117,7 +117,9 @@ export function OpenAIConnectCard() {
           {connectionLabel}
         </div>
         {hasConnection && openAiStatus.method === "cli" && (
-          <p className="text-xs text-slate-400">{openAi.cliProfile(openAiStatus.profile ?? "default")}</p>
+          <p className="text-xs text-slate-400">
+            {openAi.cliProfile(openAiStatus.cliVariant ?? "openai", openAiStatus.profile ?? "default")}
+          </p>
         )}
         {error && <p className="text-xs text-rose-300">{error}</p>}
         <div className="flex flex-col gap-3">

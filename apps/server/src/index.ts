@@ -459,27 +459,45 @@ async function openDirectoryPicker(): Promise<string | null> {
   throw new Error(`Directory picker is not supported on ${platform}`);
 }
 
+type OpenAiCliVariant = "openai" | "codex";
+
 interface OpenAiMetadata {
   method: "cli" | "apiKey";
   profile?: string;
+  cliVariant?: OpenAiCliVariant;
   updatedAt: number;
 }
 
 function formatOpenAiStatus(apiKey: string | null, metadata: OpenAiMetadata | null) {
   if (!apiKey) {
-    return { connected: false, method: null, label: null, maskedKey: null, profile: null, updatedAt: null };
+    return {
+      connected: false,
+      method: null,
+      label: null,
+      maskedKey: null,
+      profile: null,
+      cliVariant: null,
+      updatedAt: null
+    };
   }
   const trimmed = apiKey.trim();
   const visible = trimmed.slice(-4);
   const masked = `${"•".repeat(Math.max(trimmed.length - 4, 0))}${visible}`;
   const method = metadata?.method ?? "apiKey";
-  const label = method === "cli" ? `GPT Login${metadata?.profile ? ` (${metadata.profile})` : ""}` : "Manual key";
+  const cliVariant = metadata?.cliVariant ?? "openai";
+  const label =
+    method === "cli"
+      ? cliVariant === "codex"
+        ? "Codex CLI login"
+        : `GPT Login${metadata?.profile ? ` (${metadata.profile})` : ""}`
+      : "Manual key";
   return {
     connected: true,
     method,
     label,
     maskedKey: masked,
     profile: metadata?.profile ?? null,
+    cliVariant: method === "cli" ? cliVariant : null,
     updatedAt: metadata?.updatedAt ?? null
   };
 }
@@ -567,36 +585,84 @@ async function writeOpenAiKey(value: string | null) {
   await fsp.writeFile(currentEnvPath, content, "utf8");
 }
 
-function resolveOpenAiCliPath() {
+function detectCliVariantFromPath(cliPath: string, fallback: OpenAiCliVariant = "openai"): OpenAiCliVariant {
+  const basename = path.basename(cliPath).toLowerCase();
+  if (basename.startsWith("codex")) {
+    return "codex";
+  }
+  if (basename.includes("openai")) {
+    return "openai";
+  }
+  return fallback;
+}
+
+function resolveCliBinary(): { path: string; variant: OpenAiCliVariant } {
   const override = process.env.CODEX_OPENAI_CLI?.trim();
-  const overrides = override ? [path.resolve(override)] : [];
-  const localCandidates = [
-    path.join(SERVER_CWD, "node_modules", ".bin", OPENAI_CLI_BIN),
-    path.join(path.resolve(SERVER_CWD, ".."), "node_modules", ".bin", OPENAI_CLI_BIN),
-    path.join(path.resolve(SERVER_CWD, "..", ".."), "node_modules", ".bin", OPENAI_CLI_BIN)
+  const variantOverride = process.env.CODEX_OPENAI_CLI_VARIANT?.trim().toLowerCase();
+  const forcedVariant = variantOverride === "codex" ? "codex" : variantOverride === "openai" ? "openai" : null;
+
+  const tryResolve = (target: string, variantHint?: OpenAiCliVariant) => {
+    for (const candidate of expandAsarAwareCandidates(target)) {
+      if (isExecutableFile(candidate)) {
+        return { path: candidate, variant: detectCliVariantFromPath(candidate, variantHint ?? "openai") };
+      }
+    }
+    return null;
+  };
+
+  if (override) {
+    const resolved = tryResolve(path.resolve(override), forcedVariant ?? undefined);
+    if (resolved) {
+      return forcedVariant ? { path: resolved.path, variant: forcedVariant } : resolved;
+    }
+    throw new Error(
+      `Die angegebene CLI unter ${override} ist nicht ausführbar. Bitte prüfe den Pfad oder entferne CODEX_OPENAI_CLI.`
+    );
+  }
+
+  const cliNameMap: Array<{ variant: OpenAiCliVariant; names: string[] }> = [
+    {
+      variant: "codex",
+      names:
+        process.platform === "win32"
+          ? ["codex.cmd", "codex.exe", "codex.bat", "codex"]
+          : ["codex"]
+    },
+    {
+      variant: "openai",
+      names:
+        process.platform === "win32"
+          ? [OPENAI_CLI_BIN, "openai.exe", "openai.cmd", "openai.bat", "openai"]
+          : [OPENAI_CLI_BIN, "openai"]
+    }
   ];
 
-  for (const candidate of uniqueValues([...overrides, ...localCandidates])) {
-    for (const resolved of expandAsarAwareCandidates(candidate)) {
-      if (isExecutableFile(resolved)) {
-        return resolved;
+  const localDirectories = [
+    path.join(SERVER_CWD, "node_modules", ".bin"),
+    path.join(path.resolve(SERVER_CWD, ".."), "node_modules", ".bin"),
+    path.join(path.resolve(SERVER_CWD, "..", ".."), "node_modules", ".bin")
+  ];
+
+  for (const directory of uniqueValues(localDirectories)) {
+    for (const { variant, names } of cliNameMap) {
+      for (const name of names) {
+        const resolved = tryResolve(path.join(directory, name), variant);
+        if (resolved) {
+          return resolved.variant === variant ? resolved : { path: resolved.path, variant };
+        }
       }
     }
   }
 
-  const fallback = resolveExecutableFromPath(
-    uniqueValues([
-      OPENAI_CLI_BIN,
-      "openai",
-      ...(process.platform === "win32" ? ["openai.exe", "openai.cmd", "openai.bat"] : [])
-    ])
-  );
-  if (fallback) {
-    return fallback;
+  for (const { variant, names } of cliNameMap) {
+    const fallback = resolveExecutableFromPath(names);
+    if (fallback) {
+      return { path: fallback, variant };
+    }
   }
 
   throw new Error(
-    "OpenAI CLI wurde nicht gefunden. Installiere das npm-Paket 'openai' (lokal oder im Desktop-Workspace) oder setze CODEX_OPENAI_CLI auf den Pfad."
+    "OpenAI- oder Codex-CLI wurde nicht gefunden. Installiere eines der Pakete (z. B. 'npm i -g @openai/codex') oder setze CODEX_OPENAI_CLI auf den Pfad."
   );
 }
 
@@ -640,7 +706,7 @@ function extractCliApiKey(config: string, profile: string) {
   return null;
 }
 
-async function readOpenAiCliKey(profile: string) {
+async function readOpenAiConfigKey(profile: string) {
   const overrides = process.env.CODEX_OPENAI_CONFIG ? [path.resolve(process.env.CODEX_OPENAI_CONFIG)] : [];
   const roaming = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
   const candidates = [
@@ -672,13 +738,91 @@ async function readOpenAiCliKey(profile: string) {
   return null;
 }
 
+function extractCodexCliKey(content: string) {
+  try {
+    const parsed = JSON.parse(content) as { OPENAI_API_KEY?: unknown; [key: string]: unknown };
+    if (typeof parsed.OPENAI_API_KEY === "string" && parsed.OPENAI_API_KEY.trim()) {
+      return parsed.OPENAI_API_KEY.trim();
+    }
+
+    const stack: unknown[] = [parsed];
+    while (stack.length) {
+      const current = stack.pop();
+      if (!current || typeof current !== "object") {
+        continue;
+      }
+      if (Array.isArray(current)) {
+        stack.push(...current);
+        continue;
+      }
+      for (const value of Object.values(current)) {
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (trimmed && (/^sk-[A-Za-z0-9_-]{8,}/.test(trimmed) || /^sess-[A-Za-z0-9_-]{8,}/.test(trimmed))) {
+            return trimmed;
+          }
+        } else if (value && typeof value === "object") {
+          stack.push(value);
+        }
+      }
+    }
+  } catch {
+    // ignore malformed json
+  }
+  return null;
+}
+
+async function readCodexCliKey() {
+  const overrides: string[] = [];
+  const authOverride = process.env.CODEX_OPENAI_CODEX_AUTH?.trim();
+  if (authOverride) {
+    overrides.push(path.resolve(authOverride));
+  }
+  const codexHomes = [process.env.CODEX_HOME, path.join(os.homedir(), ".codex")].filter(Boolean) as string[];
+  const candidates = uniqueValues([
+    ...overrides,
+    ...codexHomes.map((home) => path.join(home, "auth.json"))
+  ]);
+
+  for (const candidate of candidates) {
+    try {
+      const content = await fsp.readFile(candidate, "utf8");
+      const key = extractCodexCliKey(content);
+      if (key) {
+        return key;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function readCliApiKey(variant: OpenAiCliVariant, profile: string) {
+  if (variant === "codex") {
+    const key = await readCodexCliKey();
+    if (key) {
+      return key;
+    }
+    return await readOpenAiConfigKey(profile);
+  }
+  const key = await readOpenAiConfigKey(profile);
+  if (key) {
+    return key;
+  }
+  return await readCodexCliKey();
+}
+
 async function loginWithOpenAiCli(profile: string) {
-  const cliPath = resolveOpenAiCliPath();
+  const { path: cliPath, variant } = resolveCliBinary();
   const args = ["login"];
-  if (profile && profile !== "default") {
+  if (variant === "openai" && profile && profile !== "default") {
     args.push("--profile", profile);
   }
-  return await new Promise<string>((resolve, reject) => {
+  return await new Promise<{ apiKey: string; variant: OpenAiCliVariant }>((resolve, reject) => {
     const child = spawn(cliPath, args, {
       cwd: SERVER_CWD,
       env: { ...process.env, OPENAI_CLI_NO_COLOR: "1" },
@@ -775,7 +919,7 @@ async function loginWithOpenAiCli(profile: string) {
       if (err.code === "EINVAL" || err.code === "ENOENT") {
         finalize(
           new Error(
-            "OpenAI-Login konnte nicht gestartet werden. Bitte installiere das npm-Paket 'openai' oder setze CODEX_OPENAI_CLI auf den Pfad zur OpenAI-CLI."
+            "OpenAI-/Codex-Login konnte nicht gestartet werden. Bitte installiere die CLI (z. B. 'npm i -g @openai/codex') oder setze CODEX_OPENAI_CLI auf den Pfad."
           )
         );
         return;
@@ -798,7 +942,7 @@ async function loginWithOpenAiCli(profile: string) {
         return;
       }
       try {
-        const key = await readOpenAiCliKey(profile);
+        const key = await readCliApiKey(variant, profile);
         if (!key) {
           finalize(
             new Error(
@@ -808,7 +952,7 @@ async function loginWithOpenAiCli(profile: string) {
           return;
         }
         finalize();
-        resolve(key);
+        resolve({ apiKey: key, variant });
       } catch (error) {
         finalize(error as Error);
       }
@@ -939,9 +1083,14 @@ app.delete("/api/settings/openai", async (_req, res) => {
 app.post("/api/settings/openai/login", async (req, res) => {
   const profile = typeof req.body?.profile === "string" && req.body.profile.trim() ? req.body.profile.trim() : "default";
   try {
-    const apiKey = await loginWithOpenAiCli(profile);
-    await writeOpenAiKey(apiKey);
-    await writeOpenAiMetadata({ method: "cli", profile, updatedAt: Date.now() });
+    const result = await loginWithOpenAiCli(profile);
+    await writeOpenAiKey(result.apiKey);
+    await writeOpenAiMetadata({
+      method: "cli",
+      profile: result.variant === "openai" ? profile : undefined,
+      cliVariant: result.variant,
+      updatedAt: Date.now()
+    });
     const [storedKey, metadata] = await Promise.all([readOpenAiKey(), readOpenAiMetadata()]);
     res.json(formatOpenAiStatus(storedKey, metadata));
   } catch (error) {
