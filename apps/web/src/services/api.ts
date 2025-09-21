@@ -61,6 +61,13 @@ export async function disconnectOpenAi() {
   });
 }
 
+export async function saveOpenAiApiKey(apiKey: string) {
+  return request<OpenAiStatus>("/api/settings/openai", {
+    method: "POST",
+    body: JSON.stringify({ apiKey })
+  });
+}
+
 export async function applyPatch(patchId: string) {
   return request<PatchEvent>(`/api/patches/${patchId}/apply`, { method: "POST" });
 }
