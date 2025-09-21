@@ -72,7 +72,15 @@ export const useEditorStore = create<EditorState>((set) => ({
   isPickerActive: false,
   previewHtml: samplePreviewHtml,
   websocketReady: false,
-  openAiStatus: { connected: false, method: null, label: null, maskedKey: null, profile: null, updatedAt: null },
+  openAiStatus: {
+    connected: false,
+    method: null,
+    label: null,
+    maskedKey: null,
+    profile: null,
+    cliVariant: null,
+    updatedAt: null
+  },
   tutorialVisible: false,
   tutorialStep: 0,
   tutorialCompleted: storedTutorialState === "completed",

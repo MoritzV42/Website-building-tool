@@ -72,7 +72,7 @@ npm run dev:desktop
 * Wenn dein Projekt einen Dev‑Server hat (z. B. Vite/Next): URL eintragen (z. B. [http://localhost:3000](http://localhost:3000)).
 * Für statische Sites: Build‑Ordner (z. B. `dist/`) angeben.
 
-**GPT-Account verknüpfen:** In der rechten Spalte findest du die Karte **„Codex mit GPT verbinden“**. Ein Klick auf **„Mit GPT anmelden“** startet `openai login` direkt aus der App, öffnet den offiziellen Browser-Flow und speichert den Token ausschließlich in deinem Codex-Profil (`%APPDATA%/…` bzw. `~/Library/Application Support/`). Du kannst die Verbindung jederzeit neu herstellen oder trennen – der Token verlässt nie deinen Rechner.
+**GPT-Account verknüpfen:** In der rechten Spalte findest du die Karte **„Codex mit GPT verbinden“**. Ein Klick auf **„Mit GPT anmelden“** startet automatisch die installierte OpenAI- oder Codex-CLI (z. B. `openai login` oder `codex login`), öffnet den offiziellen Browser-Flow und speichert den Token ausschließlich in deinem Codex-Profil (`%APPDATA%/…` bzw. `~/Library/Application Support/`). Du kannst die Verbindung jederzeit neu herstellen oder trennen – der Token verlässt nie deinen Rechner.
 
 **Alternative ohne CLI:** Direkt unter den Buttons kannst du einen bestehenden API-Schlüssel einfügen und speichern. Die App übernimmt den Wert in dein lokales Codex-Profil, falls der CLI-Login nicht verfügbar ist.
 
