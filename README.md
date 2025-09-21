@@ -74,6 +74,8 @@ npm run dev:desktop
 
 **GPT-Account verknüpfen:** In der rechten Spalte findest du die Karte **„Codex mit GPT verbinden“**. Ein Klick auf **„Mit GPT anmelden“** startet `openai login` direkt aus der App, öffnet den offiziellen Browser-Flow und speichert den Token ausschließlich in deinem Codex-Profil (`%APPDATA%/…` bzw. `~/Library/Application Support/`). Du kannst die Verbindung jederzeit neu herstellen oder trennen – der Token verlässt nie deinen Rechner.
 
+**Alternative ohne CLI:** Direkt unter den Buttons kannst du einen bestehenden API-Schlüssel einfügen und speichern. Die App übernimmt den Wert in dein lokales Codex-Profil, falls der CLI-Login nicht verfügbar ist.
+
 ### Windows-Verknüpfung & Icon
 
 `StartWebsiteBuilder.py` erstellt beim Start eine Verknüpfung **„Codex Website Builder.lnk“** im Projektordner, legt automatisch das Icon `assets/codex-launcher.ico` aus der Textdatei `assets/codex-launcher.ico.b64` an **und startet die Desktop-App (`npm run dev:desktop`)**. Du kannst die Verknüpfung an die Taskleiste pinnen oder das Icon nach Bedarf austauschen, indem du die generierte `.ico`-Datei ersetzt.

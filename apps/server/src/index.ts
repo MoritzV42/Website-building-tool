@@ -785,7 +785,16 @@ async function loginWithOpenAiCli(profile: string) {
 
     child.on("close", async (code) => {
       if (code !== 0) {
-        finalize(new Error(stderr.trim() || stdout.trim() || "OpenAI-Login fehlgeschlagen."));
+        const combined = `${stderr}${stdout}`.trim();
+        if (/unknown\s+subcommand\s+login/i.test(combined) || /invalid\s+choice:\s*'login'/i.test(combined)) {
+          finalize(
+            new Error(
+              "Die gefundene OpenAI-CLI unterstützt den Befehl \"login\" nicht. Folge der offiziellen Installationsanleitung (https://platform.openai.com/docs/guides/openai-cli) oder füge deinen API-Schlüssel manuell in Codex ein."
+            )
+          );
+          return;
+        }
+        finalize(new Error(combined || "OpenAI-Login fehlgeschlagen."));
         return;
       }
       try {
