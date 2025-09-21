@@ -113,8 +113,16 @@ interface Translation {
     disconnecting: string;
     loginHint: string;
     loginDetails: string;
+    manualLabel: string;
+    manualHint: string;
+    manualPlaceholder: string;
+    manualSave: string;
+    manualSaving: string;
+    manualDetails: string;
+    manualError: string;
     statusConnected: (label: string) => string;
     statusMasked: (masked: string) => string;
+    statusManual: (masked: string) => string;
     statusMissing: string;
     cliProfile: (profile: string) => string;
   };
@@ -312,8 +320,16 @@ export const translations: Record<Language, Translation> = {
       disconnecting: "Disconnecting…",
       loginHint: "A browser window opens with the official OpenAI login flow.",
       loginDetails: "After finishing the flow the CLI stores a short-lived API key in ~/.config/openai/config.yaml.",
+      manualLabel: "Paste an API key manually",
+      manualHint: "Create or reuse an API key on platform.openai.com and paste it here if the CLI login is unavailable.",
+      manualPlaceholder: "sk-...",
+      manualSave: "Save API key",
+      manualSaving: "Saving…",
+      manualDetails: "Codex stores the key only inside your local Codex profile directory (never in the cloud).",
+      manualError: "Please enter a valid API key before saving.",
       statusConnected: (label: string) => `Connected • ${label}`,
       statusMasked: (masked: string) => `Token ${masked}`,
+      statusManual: (masked: string) => `Manual key ${masked}`,
       statusMissing: "Not connected yet",
       cliProfile: (profile: string) => `Linked via OpenAI CLI profile “${profile}”`
     },
@@ -512,8 +528,16 @@ export const translations: Record<Language, Translation> = {
       disconnecting: "Trenne…",
       loginHint: "Wir öffnen das offizielle OpenAI-Login im Browser.",
       loginDetails: "Nach Abschluss legt die CLI den Schlüssel unter ~/.config/openai/config.yaml ab.",
+      manualLabel: "API-Schlüssel direkt eintragen",
+      manualHint: "Falls der CLI-Login nicht klappt: Erzeuge auf platform.openai.com einen API-Schlüssel und füge ihn hier ein.",
+      manualPlaceholder: "sk-...",
+      manualSave: "API-Schlüssel speichern",
+      manualSaving: "Speichere…",
+      manualDetails: "Codex speichert den Wert ausschließlich lokal in deinem Codex-Profil.",
+      manualError: "Bitte gib vor dem Speichern einen gültigen API-Schlüssel ein.",
       statusConnected: (label: string) => `Verbunden • ${label}`,
       statusMasked: (masked: string) => `Token ${masked}`,
+      statusManual: (masked: string) => `Eigener Schlüssel ${masked}`,
       statusMissing: "Noch nicht verbunden",
       cliProfile: (profile: string) => `Gekoppelt über CLI-Profil „${profile}“`
     },

@@ -29,6 +29,8 @@ const DEFAULT_SHADOW_PATH = process.env.CODEX_SHADOW_PATH
 
 const SERVER_CWD = process.env.CODEX_SERVER_CWD ? path.resolve(process.env.CODEX_SERVER_CWD) : process.cwd();
 const OPENAI_CLI_BIN = process.platform === "win32" ? "openai.cmd" : "openai";
+const NPX_BIN = process.platform === "win32" ? "npx.cmd" : "npx";
+const OPENAI_LOGIN_UNSUPPORTED_CODE = "OPENAI_CLI_LOGIN_UNSUPPORTED" as const;
 
 let currentEnvPath = DEFAULT_ENV_PATH;
 let currentMetadataPath = DEFAULT_METADATA_PATH;
@@ -600,6 +602,33 @@ function resolveOpenAiCliPath() {
   );
 }
 
+function resolveNpxPath() {
+  const override = process.env.CODEX_NPX_PATH?.trim();
+  const overrides = override ? [path.resolve(override)] : [];
+  const localCandidates = [
+    path.join(SERVER_CWD, "node_modules", ".bin", NPX_BIN),
+    path.join(path.resolve(SERVER_CWD, ".."), "node_modules", ".bin", NPX_BIN),
+    path.join(path.resolve(SERVER_CWD, "..", ".."), "node_modules", ".bin", NPX_BIN)
+  ];
+
+  for (const candidate of uniqueValues([...overrides, ...localCandidates])) {
+    for (const resolved of expandAsarAwareCandidates(candidate)) {
+      if (isExecutableFile(resolved)) {
+        return resolved;
+      }
+    }
+  }
+
+  const fallback = resolveExecutableFromPath(uniqueValues([NPX_BIN, "npx"]));
+  if (fallback) {
+    return fallback;
+  }
+
+  throw new Error(
+    "npx wurde nicht gefunden. Installiere Node.js 18+ oder setze CODEX_NPX_PATH auf den Pfad zur npx-Binary."
+  );
+}
+
 function extractCliApiKey(config: string, profile: string) {
   const lines = config.split(/\r?\n/);
   let inSection = false;
@@ -672,19 +701,21 @@ async function readOpenAiCliKey(profile: string) {
   return null;
 }
 
-async function loginWithOpenAiCli(profile: string) {
-  const cliPath = resolveOpenAiCliPath();
-  const args = ["login"];
-  if (profile && profile !== "default") {
-    args.push("--profile", profile);
-  }
-  return await new Promise<string>((resolve, reject) => {
-    const child = spawn(cliPath, args, {
+interface OpenAiLoginCommandOptions {
+  executable: string;
+  args: string[];
+  label: string;
+  spawnErrorHint: string;
+}
+
+async function runOpenAiLoginCommand({ executable, args, label, spawnErrorHint }: OpenAiLoginCommandOptions) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(executable, args, {
       cwd: SERVER_CWD,
       env: { ...process.env, OPENAI_CLI_NO_COLOR: "1" },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: process.platform === "win32",
-      shell: process.platform === "win32" && path.extname(cliPath).toLowerCase() === ".cmd"
+      shell: process.platform === "win32" && path.extname(executable).toLowerCase() === ".cmd"
     });
 
     let stdout = "";
@@ -720,8 +751,14 @@ async function loginWithOpenAiCli(profile: string) {
         }
       }
       const trailingLine = buffer.split(/\r?\n/).pop();
-      if (trailingLine && trailingLine.trim().endsWith("?")) {
-        respond();
+      if (trailingLine) {
+        const trimmed = trailingLine.trim();
+        if (
+          trimmed.endsWith("?") ||
+          /\?\s*(?:\(|\[)?[yn](?:\/[yn])?(?:\)|\])?\s*$/i.test(trimmed)
+        ) {
+          respond();
+        }
       }
     };
 
@@ -764,47 +801,117 @@ async function loginWithOpenAiCli(profile: string) {
       clearTimeout(initialKick);
       if (error) {
         reject(error);
+      } else {
+        resolve();
       }
     };
 
     child.on("error", (error) => {
       const err = error as NodeJS.ErrnoException;
       console.warn(
-        `[openai-cli] Login-Aufruf konnte nicht gestartet werden (${err.code ?? "unknown"}): ${err.message}`
+        `[openai-cli] Login-Aufruf (${label}) konnte nicht gestartet werden (${err.code ?? "unknown"}): ${err.message}`
       );
       if (err.code === "EINVAL" || err.code === "ENOENT") {
-        finalize(
-          new Error(
-            "OpenAI-Login konnte nicht gestartet werden. Bitte installiere das npm-Paket 'openai' oder setze CODEX_OPENAI_CLI auf den Pfad zur OpenAI-CLI."
-          )
-        );
+        const friendly = new Error(`OpenAI-Login konnte mit ${label} nicht gestartet werden. ${spawnErrorHint}`);
+        (friendly as NodeJS.ErrnoException).code = err.code;
+        (friendly as { cause?: unknown }).cause = err;
+        finalize(friendly);
         return;
       }
       finalize(err);
     });
 
-    child.on("close", async (code) => {
+    child.on("close", (code) => {
       if (code !== 0) {
-        finalize(new Error(stderr.trim() || stdout.trim() || "OpenAI-Login fehlgeschlagen."));
-        return;
-      }
-      try {
-        const key = await readOpenAiCliKey(profile);
-        if (!key) {
-          finalize(
-            new Error(
-              "Die Anmeldung wurde abgeschlossen, aber es wurde kein API-Schlüssel gefunden. Bitte versuche es erneut oder lege den Schlüssel manuell fest."
-            )
+        const combined = `${stderr}${stdout}`.trim();
+        if (/unknown\s+subcommand\s+login/i.test(combined) || /invalid\s+choice:\s*'login'/i.test(combined)) {
+          const unsupported = new Error(
+            "Die verwendete OpenAI-CLI unterstützt den Befehl \"login\" nicht. Folge der offiziellen Installationsanleitung (https://platform.openai.com/docs/guides/openai-cli) oder füge deinen API-Schlüssel manuell in Codex ein."
           );
+          (unsupported as NodeJS.ErrnoException).code = OPENAI_LOGIN_UNSUPPORTED_CODE;
+          finalize(unsupported);
           return;
         }
-        finalize();
-        resolve(key);
-      } catch (error) {
-        finalize(error as Error);
+        const failure = new Error(combined || `OpenAI-Login mit ${label} fehlgeschlagen.`);
+        finalize(failure);
+        return;
       }
+      finalize();
     });
   });
+}
+
+async function loginWithOpenAiCli(profile: string) {
+  const args = ["login"];
+  if (profile && profile !== "default") {
+    args.push("--profile", profile);
+  }
+
+  const cliPath = resolveOpenAiCliPath();
+  try {
+    await runOpenAiLoginCommand({
+      executable: cliPath,
+      args,
+      label: path.basename(cliPath),
+      spawnErrorHint:
+        "Bitte installiere das npm-Paket 'openai' (lokal oder im Desktop-Workspace) oder setze CODEX_OPENAI_CLI auf den Pfad zur CLI."
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === OPENAI_LOGIN_UNSUPPORTED_CODE) {
+      return await loginWithNpxFallback(profile, error as Error);
+    }
+    throw error;
+  }
+
+  const key = await readOpenAiCliKey(profile);
+  if (!key) {
+    throw new Error(
+      "Die Anmeldung wurde abgeschlossen, aber es wurde kein API-Schlüssel gefunden. Bitte versuche es erneut oder lege den Schlüssel manuell fest."
+    );
+  }
+  return key;
+}
+
+async function loginWithNpxFallback(profile: string, originalError: Error) {
+  let npxPath: string;
+  try {
+    npxPath = resolveNpxPath();
+  } catch (resolveError) {
+    const wrapped = new Error(
+      `${originalError.message}\n\nAutomatischer Versuch, die aktuelle CLI über npx zu verwenden, konnte nicht gestartet werden: ${(resolveError as Error).message}`
+    );
+    (wrapped as { cause?: unknown }).cause = resolveError;
+    throw wrapped;
+  }
+
+  const fallbackArgs = ["-y", "openai@latest", "login"];
+  if (profile && profile !== "default") {
+    fallbackArgs.push("--profile", profile);
+  }
+
+  try {
+    await runOpenAiLoginCommand({
+      executable: npxPath,
+      args: fallbackArgs,
+      label: "npx openai@latest",
+      spawnErrorHint:
+        "Bitte installiere Node.js 18+ (inklusive npx) oder setze CODEX_NPX_PATH auf den Pfad zur npx-Binary."
+    });
+  } catch (fallbackError) {
+    const wrapped = new Error(
+      `${originalError.message}\n\nZusätzlicher Versuch mit "npx openai@latest login" schlug fehl: ${(fallbackError as Error).message}`
+    );
+    (wrapped as { cause?: unknown }).cause = fallbackError;
+    throw wrapped;
+  }
+
+  const key = await readOpenAiCliKey(profile);
+  if (!key) {
+    throw new Error(
+      `Der Login über "npx openai@latest" wurde abgeschlossen, aber es wurde kein API-Schlüssel gefunden. Bitte führe "npx -y openai@latest login" im Terminal aus oder trage den Schlüssel manuell ein.`
+    );
+  }
+  return key;
 }
 
 const app = express();
