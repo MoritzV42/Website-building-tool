@@ -76,6 +76,8 @@ npm run dev:desktop
 
 **Alternative ohne CLI:** Direkt unter den Buttons kannst du einen bestehenden API-Schlüssel einfügen und speichern. Die App übernimmt den Wert in dein lokales Codex-Profil, falls der CLI-Login nicht verfügbar ist.
 
+**Alternative ohne CLI:** Direkt unter den Buttons kannst du einen bestehenden API-Schlüssel einfügen und speichern. Die App übernimmt den Wert in dein lokales Codex-Profil, falls der CLI-Login nicht verfügbar ist.
+
 ### Windows-Verknüpfung & Icon
 
 `StartWebsiteBuilder.py` erstellt beim Start eine Verknüpfung **„Codex Website Builder.lnk“** im Projektordner, legt automatisch das Icon `assets/codex-launcher.ico` aus der Textdatei `assets/codex-launcher.ico.b64` an **und startet die Desktop-App (`npm run dev:desktop`)**. Du kannst die Verknüpfung an die Taskleiste pinnen oder das Icon nach Bedarf austauschen, indem du die generierte `.ico`-Datei ersetzt.

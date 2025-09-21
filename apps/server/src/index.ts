@@ -825,8 +825,23 @@ async function runOpenAiLoginCommand({ executable, args, label, spawnErrorHint }
       if (code !== 0) {
         const combined = `${stderr}${stdout}`.trim();
         if (/unknown\s+subcommand\s+login/i.test(combined) || /invalid\s+choice:\s*'login'/i.test(combined)) {
-          const unsupported = new Error(
-            "Die verwendete OpenAI-CLI unterstützt den Befehl \"login\" nicht. Folge der offiziellen Installationsanleitung (https://platform.openai.com/docs/guides/openai-cli) oder füge deinen API-Schlüssel manuell in Codex ein."
+          finalize(
+            new Error(
+              "Die gefundene OpenAI-CLI unterstützt den Befehl \"login\" nicht. Folge der offiziellen Installationsanleitung (https://platform.openai.com/docs/guides/openai-cli) oder füge deinen API-Schlüssel manuell in Codex ein."
+            )
+          );
+          return;
+        }
+        finalize(new Error(combined || "OpenAI-Login fehlgeschlagen."));
+        return;
+      }
+      try {
+        const key = await readOpenAiCliKey(profile);
+        if (!key) {
+          finalize(
+            new Error(
+              "Die Anmeldung wurde abgeschlossen, aber es wurde kein API-Schlüssel gefunden. Bitte versuche es erneut oder lege den Schlüssel manuell fest."
+            )
           );
           (unsupported as NodeJS.ErrnoException).code = OPENAI_LOGIN_UNSUPPORTED_CODE;
           finalize(unsupported);
